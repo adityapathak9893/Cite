@@ -1,0 +1,40 @@
+/* ─── Font loading ───
+   Instrument Serif & JetBrains Mono: loaded via <link> in index.html
+   General Sans: loaded via @font-face below (self-host in production)
+
+   All fonts use font-display: swap for zero layout shift.
+   Body font (General Sans) is preloaded in index.html <head>.
+─── */
+
+/* General Sans via Fontshare CDN — replace with self-hosted in production */
+@font-face {
+  font-family: 'General Sans';
+  src: url('https://cdn.fontshare.com/wf/ZFUFCZKNPFBMJQ7YLOCSRGUXLCCJBEYB/DCTG6E72NTEX7FJ4W2L5C5XC4H7BO4QL/PCUIHFNF637JHQBWXN5LXOXILM4B2AUP.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'General Sans';
+  src: url('https://cdn.fontshare.com/wf/ZFUFCZKNPFBMJQ7YLOCSRGUXLCCJBEYB/PGD7HTCLQ73OIMLPRGN27YBH3S3F6MBH/KSFV6YZJ5ITKCKJRZJLLXJ6KNDHTBKXR.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'General Sans';
+  src: url('https://cdn.fontshare.com/wf/ZFUFCZKNPFBMJQ7YLOCSRGUXLCCJBEYB/YZPHDXSB45BJAPWDMQDDFSUHXDVVWXUB/KGMGK5CEBNKFPXDQMLJ54ZOA3FYDRTEF.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'General Sans';
+  src: url('https://cdn.fontshare.com/wf/ZFUFCZKNPFBMJQ7YLOCSRGUXLCCJBEYB/65IZWEQAKZWB3DLJ4M3GTKWM2UVOBXSS/5YAR55WK2QNJWU2XB4R5BFJGIXRXRMFQ.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
