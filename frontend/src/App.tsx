@@ -10,6 +10,7 @@ const Landing = lazy(() => import("@/pages/Landing"))
 const Login = lazy(() => import("@/pages/Login"))
 const Signup = lazy(() => import("@/pages/Signup"))
 const Dashboard = lazy(() => import("@/pages/Dashboard"))
+const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/knowledge-base/:id" element={<KnowledgeBase />} />
               </Route>
             </Route>
           </Routes>

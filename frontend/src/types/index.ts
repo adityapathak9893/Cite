@@ -6,6 +6,7 @@ export interface KnowledgeBase {
   is_public: boolean
   created_at: string
   updated_at: string
+  document_count: number
 }
 
 export interface Document {

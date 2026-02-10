@@ -19,7 +19,8 @@ export function Sidebar() {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("cite-theme") as Theme) ?? "system"
   )
-  const [collapsed, setCollapsed] = useState(false)
+  // TODO: wire up collapse toggle (Phase 2+)
+  const [collapsed, _setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const resolvedTheme = getResolvedTheme(theme)
