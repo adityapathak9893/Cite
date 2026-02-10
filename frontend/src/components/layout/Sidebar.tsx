@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useAuth } from "@/hooks/useAuth"
-import { LayoutDashboard, LogOut, Moon, Sun, Menu, X } from "lucide-react"
+import { LayoutDashboard, LogOut, Menu, X } from "lucide-react"
+import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { cn } from "@/lib/utils"
 
 type Theme = "light" | "dark" | "system"
@@ -74,12 +75,16 @@ export function Sidebar() {
               key={item.path}
               to={item.path}
               className={cn(
-                "flex items-center gap-2.5 h-9 rounded-md px-2 text-sm font-medium transition-[background-color] duration-150",
+                "relative flex items-center gap-2.5 h-9 rounded-md px-3 text-sm font-medium transition-[background-color,color] duration-150",
                 isActive
-                  ? "bg-[var(--accent-primary-ghost)] text-[var(--accent-primary)] border-l-2 border-[var(--accent-primary)]"
+                  ? "bg-[var(--accent-primary-ghost)] text-[var(--accent-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
               )}
             >
+              {/* Left accent bar for active item */}
+              {isActive && (
+                <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-[var(--accent-primary)]" />
+              )}
               <Icon size={18} strokeWidth={1.75} />
               {!collapsed && <span>{item.label}</span>}
             </Link>
@@ -88,27 +93,19 @@ export function Sidebar() {
       </nav>
 
       {/* Bottom section */}
-      <div className="px-2 pb-3 space-y-2 border-t border-[var(--border-primary)] pt-3">
-        {/* Theme toggle */}
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="flex items-center gap-2.5 w-full h-9 rounded-md px-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-[background-color] duration-150"
-          aria-label={`Switch to ${resolvedTheme === "light" ? "dark" : "light"} theme`}
-        >
-          {resolvedTheme === "light" ? (
-            <Moon size={18} strokeWidth={1.75} />
-          ) : (
-            <Sun size={18} strokeWidth={1.75} />
-          )}
-          {!collapsed && (
-            <span>{resolvedTheme === "light" ? "Dark mode" : "Light mode"}</span>
-          )}
-        </button>
+      <div className="px-3 pb-3 space-y-3 border-t border-[var(--border-primary)] pt-3">
+        {/* Theme toggle — pill switch */}
+        <div className={cn("flex", collapsed ? "justify-center" : "justify-start")}>
+          <ThemeToggle
+            theme={resolvedTheme}
+            onToggle={toggleTheme}
+            collapsed={collapsed}
+          />
+        </div>
 
         {/* User area */}
         {user && (
-          <div className="flex items-center gap-2.5 px-2">
+          <div className="flex items-center gap-2.5 px-0.5">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent-primary)] text-white text-xs font-semibold shrink-0">
               {user.email?.charAt(0).toUpperCase()}
             </div>
