@@ -18,6 +18,7 @@ export function useConversations(kbId: string) {
         `/api/v1/knowledge-bases/${kbId}/conversations`
       ),
     enabled: !!kbId,
+    staleTime: 30_000,
   })
 }
 
@@ -29,6 +30,7 @@ export function useChatMessages(conversationId: string | null) {
         `/api/v1/conversations/${conversationId}/messages`
       ),
     enabled: !!conversationId,
+    staleTime: 30_000,
   })
 }
 

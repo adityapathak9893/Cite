@@ -18,20 +18,58 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
 
   const { data: documents } = useDocuments(kbId)
   const { data: conversations } = useConversations(kbId)
-  const { data: messages = [] } = useChatMessages(conversationId)
+  const { data: messages = [], isLoading: isLoadingMessages } =
+    useChatMessages(conversationId)
   const { sendMessage, isStreaming, streamingContent, streamingSources } =
     useSendMessage(kbId)
+
+  // Delay showing the loading skeleton by 300ms to avoid flicker on fast loads
+  const [showSkeleton, setShowSkeleton] = useState(false)
+  useEffect(() => {
+    if (!isLoadingMessages) {
+      setShowSkeleton(false)
+      return
+    }
+    const timer = setTimeout(() => setShowSkeleton(true), 300)
+    return () => clearTimeout(timer)
+  }, [isLoadingMessages])
+
+  // Auto-select the most recent conversation on initial load
+  const hasInitialized = useRef(false)
+  useEffect(() => {
+    if (hasInitialized.current) return
+    if (conversations && conversations.length > 0) {
+      setConversationId(conversations[0].id)
+      hasInitialized.current = true
+    }
+  }, [conversations])
 
   const readyDocCount =
     documents?.filter((d) => d.status === "ready").length ?? 0
   const hasMessages = messages.length > 0 || isStreaming
 
-  // Auto-scroll: smooth for new messages, instant during streaming to avoid jank
+  // Auto-scroll to bottom:
+  // - instant on initial load / conversation switch (no jarring animation)
+  // - instant during streaming to avoid jank
+  // - smooth when a new message is added by the user
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: isStreaming ? "instant" : "smooth",
     })
   }, [messages.length, streamingContent, isStreaming])
+
+  // Scroll to bottom instantly when messages finish loading (page load / conversation switch)
+  const prevLoadingRef = useRef(isLoadingMessages)
+  useEffect(() => {
+    const wasLoading = prevLoadingRef.current
+    prevLoadingRef.current = isLoadingMessages
+    if (wasLoading && !isLoadingMessages && messages.length > 0) {
+      // Use requestAnimationFrame to ensure DOM has rendered the messages
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+      })
+    }
+  }, [isLoadingMessages, messages.length])
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -95,6 +133,28 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
               Your documents need to be processed before you can ask questions.
             </p>
           </div>
+        ) : showSkeleton ? (
+          /* Skeleton loading state — only shown after 300ms delay */
+          <div className="space-y-4 p-4 sm:p-6">
+            {/* User bubble skeleton */}
+            <div className="flex justify-end">
+              <div className="h-10 w-[55%] animate-pulse rounded-[16px_16px_4px_16px] bg-[var(--bg-tertiary)]" />
+            </div>
+            {/* Assistant bubble skeleton */}
+            <div className="flex justify-start">
+              <div className="space-y-2 w-[70%]">
+                <div className="h-20 animate-pulse rounded-[16px_16px_16px_4px] bg-[var(--bg-tertiary)]" />
+                <div className="h-5 w-36 animate-pulse rounded-md bg-[var(--bg-tertiary)]" />
+              </div>
+            </div>
+            {/* User bubble skeleton */}
+            <div className="flex justify-end">
+              <div className="h-10 w-[40%] animate-pulse rounded-[16px_16px_4px_16px] bg-[var(--bg-tertiary)]" />
+            </div>
+          </div>
+        ) : isLoadingMessages ? (
+          /* Within 300ms delay — show nothing to avoid flicker */
+          null
         ) : !hasMessages ? (
           /* Empty state with suggestions */
           <SuggestionChips onSelect={handleSend} disabled={isStreaming} />
