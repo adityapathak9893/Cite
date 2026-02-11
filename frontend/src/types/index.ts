@@ -50,6 +50,11 @@ export interface Source {
   similarity: number
 }
 
+export interface UploadingFile {
+  tempId: string
+  fileName: string
+}
+
 export interface HealthResponse {
   status: string
   environment: string

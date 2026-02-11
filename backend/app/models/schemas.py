@@ -46,3 +46,20 @@ class KnowledgeBaseResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     document_count: int
+
+
+# ─── Document schemas ───
+
+
+class DocumentResponse(BaseModel):
+    id: str
+    knowledge_base_id: str
+    user_id: str
+    file_name: str
+    file_path: str
+    file_size: int | None
+    mime_type: str | None
+    status: str
+    error_message: str | None
+    chunk_count: int
+    created_at: datetime

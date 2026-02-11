@@ -120,6 +120,71 @@ class ApiClient {
   async delete<T>(endpoint: string, options?: Omit<ApiRequestOptions, "method" | "body">): Promise<T> {
     return this.request<T>(endpoint, { ...options, method: "DELETE" })
   }
+
+  async uploadFile<T>(endpoint: string, file: File, timeout = 120000): Promise<T> {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`
+    }
+    // Do NOT set Content-Type — browser sets it with FormData boundary
+
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: "POST",
+        headers,
+        body: formData,
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        const errorData = (await response.json().catch(() => null)) as ApiError | null
+
+        if (response.status === 401) {
+          await supabase.auth.signOut()
+          window.location.href = "/login"
+        }
+
+        throw new ApiClientError(
+          errorData?.error?.message ?? `Request failed with status ${response.status}`,
+          response.status,
+          errorData?.error?.code ?? "UNKNOWN_ERROR"
+        )
+      }
+
+      return (await response.json()) as T
+    } catch (error) {
+      clearTimeout(timeoutId)
+
+      if (error instanceof ApiClientError) {
+        throw error
+      }
+
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new ApiClientError(
+          "Upload timed out. Please try again with a smaller file.",
+          0,
+          "TIMEOUT"
+        )
+      }
+
+      throw new ApiClientError(
+        "Unable to connect. Please check your internet and try again.",
+        0,
+        "NETWORK_ERROR"
+      )
+    }
+  }
 }
 
 export class ApiClientError extends Error {
