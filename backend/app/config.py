@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str
     openai_api_key: str
     anthropic_api_key: str
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,https://cite.weaverbit.com,https://cite-omega.vercel.app"
     environment: str = "development"
 
     @property
