@@ -35,6 +35,7 @@ export default function KnowledgeBase() {
 
   return (
     <>
+      {/* Page header — fixed height, never shrinks */}
       <Header
         title={kb?.name ?? "Knowledge Base"}
         actions={
@@ -48,14 +49,14 @@ export default function KnowledgeBase() {
       />
 
       {/* Mobile/Tablet tab switcher — hidden on desktop */}
-      <div className="flex border-b border-[var(--border-primary)] lg:hidden">
+      <div className="flex shrink-0 border-b border-[var(--border-primary)] lg:hidden">
         <button
           type="button"
           onClick={() => setActiveTab("documents")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors duration-150",
+            "flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium transition-colors duration-150",
             activeTab === "documents"
-              ? "text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]"
+              ? "border-b-2 border-[var(--accent-primary)] text-[var(--accent-primary)]"
               : "text-[var(--text-secondary)]"
           )}
         >
@@ -66,9 +67,9 @@ export default function KnowledgeBase() {
           type="button"
           onClick={() => setActiveTab("chat")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors duration-150",
+            "flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium transition-colors duration-150",
             activeTab === "chat"
-              ? "text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]"
+              ? "border-b-2 border-[var(--accent-primary)] text-[var(--accent-primary)]"
               : "text-[var(--text-secondary)]"
           )}
         >
@@ -77,36 +78,36 @@ export default function KnowledgeBase() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <div className="mx-auto flex h-full max-w-[1200px] gap-6 p-6">
-          {/* Left panel: Documents */}
-          <div
-            className={cn(
-              "flex flex-col gap-5 overflow-y-auto lg:w-[420px] lg:shrink-0",
-              // Mobile: toggle visibility based on active tab
-              activeTab === "documents" ? "w-full" : "hidden"
-            )}
-          >
-            <DocumentUpload
-              kbId={kbId}
-              onUploadStart={handleUploadStart}
-              onUploadEnd={handleUploadEnd}
-            />
-            <DocumentList kbId={kbId} uploadingFiles={uploadingFiles} />
-          </div>
+      {/* Main content — takes ALL remaining height, never overflows */}
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 overflow-hidden">
+        {/* Left panel: Documents — scrolls independently */}
+        <div
+          className={cn(
+            "flex-col gap-5 overflow-y-auto p-6 lg:flex lg:w-[420px] lg:shrink-0",
+            activeTab === "documents" ? "flex w-full" : "hidden"
+          )}
+        >
+          <DocumentUpload
+            kbId={kbId}
+            onUploadStart={handleUploadStart}
+            onUploadEnd={handleUploadEnd}
+          />
+          <DocumentList kbId={kbId} uploadingFiles={uploadingFiles} />
+        </div>
 
-          {/* Right panel: Chat */}
-          <div
-            className={cn(
-              "flex-1 min-h-0 lg:flex",
-              activeTab === "chat" ? "flex" : "hidden"
-            )}
-          >
-            <ChatWindow
-              kbId={kbId}
-              kbName={kb?.name ?? "Knowledge Base"}
-            />
-          </div>
+        {/* Right panel: Chat — flex column so header/messages/input stack */}
+        <div
+          className={cn(
+            "min-w-0 flex-col pt-6 pr-6 pb-6 lg:flex lg:flex-1",
+            activeTab === "chat" ? "flex flex-1 pl-6" : "hidden",
+            // On desktop, no left padding — gap from documents panel is enough
+            "lg:pl-0"
+          )}
+        >
+          <ChatWindow
+            kbId={kbId}
+            kbName={kb?.name ?? "Knowledge Base"}
+          />
         </div>
       </div>
     </>

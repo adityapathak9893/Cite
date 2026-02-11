@@ -48,23 +48,19 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
     documents?.filter((d) => d.status === "ready").length ?? 0
   const hasMessages = messages.length > 0 || isStreaming
 
-  // Auto-scroll to bottom:
-  // - instant on initial load / conversation switch (no jarring animation)
-  // - instant during streaming to avoid jank
-  // - smooth when a new message is added by the user
+  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: isStreaming ? "instant" : "smooth",
     })
   }, [messages.length, streamingContent, isStreaming])
 
-  // Scroll to bottom instantly when messages finish loading (page load / conversation switch)
+  // Scroll to bottom instantly when messages finish loading
   const prevLoadingRef = useRef(isLoadingMessages)
   useEffect(() => {
     const wasLoading = prevLoadingRef.current
     prevLoadingRef.current = isLoadingMessages
     if (wasLoading && !isLoadingMessages && messages.length > 0) {
-      // Use requestAnimationFrame to ensure DOM has rendered the messages
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
       })
@@ -82,9 +78,9 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
   )
 
   return (
-    <div className="flex h-full w-full flex-col rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)]">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--border-primary)] px-4 py-3 sm:px-5">
+    <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)]">
+      {/* Chat header — fixed, never shrinks */}
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-primary)] px-4 py-3 sm:px-5">
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-[var(--text-primary)] font-[var(--font-body)]">
             {kbName}
@@ -116,10 +112,9 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
         )}
       </div>
 
-      {/* Messages area */}
+      {/* Messages — scrollable, takes all remaining space */}
       <div className="flex-1 overflow-y-auto">
         {readyDocCount === 0 ? (
-          /* No documents ready */
           <div className="flex h-full flex-col items-center justify-center px-6">
             <FileText
               size={32}
@@ -134,38 +129,30 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
             </p>
           </div>
         ) : showSkeleton ? (
-          /* Skeleton loading state — only shown after 300ms delay */
           <div className="space-y-4 p-4 sm:p-6">
-            {/* User bubble skeleton */}
             <div className="flex justify-end">
               <div className="h-10 w-[55%] animate-pulse rounded-[16px_16px_4px_16px] bg-[var(--bg-tertiary)]" />
             </div>
-            {/* Assistant bubble skeleton */}
             <div className="flex justify-start">
-              <div className="space-y-2 w-[70%]">
+              <div className="w-[70%] space-y-2">
                 <div className="h-20 animate-pulse rounded-[16px_16px_16px_4px] bg-[var(--bg-tertiary)]" />
                 <div className="h-5 w-36 animate-pulse rounded-md bg-[var(--bg-tertiary)]" />
               </div>
             </div>
-            {/* User bubble skeleton */}
             <div className="flex justify-end">
               <div className="h-10 w-[40%] animate-pulse rounded-[16px_16px_4px_16px] bg-[var(--bg-tertiary)]" />
             </div>
           </div>
         ) : isLoadingMessages ? (
-          /* Within 300ms delay — show nothing to avoid flicker */
           null
         ) : !hasMessages ? (
-          /* Empty state with suggestions */
           <SuggestionChips onSelect={handleSend} disabled={isStreaming} />
         ) : (
-          /* Message list */
           <div className="space-y-4 p-4 sm:p-6">
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
 
-            {/* Streaming states */}
             {isStreaming && !streamingContent && <StreamingIndicator />}
             {isStreaming && streamingContent && (
               <StreamingBubble
@@ -180,7 +167,7 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
         )}
       </div>
 
-      {/* Input area */}
+      {/* Input — fixed at bottom, NEVER cut off */}
       <ChatInput
         onSend={handleSend}
         disabled={isStreaming || readyDocCount === 0}

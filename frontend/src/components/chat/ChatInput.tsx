@@ -48,8 +48,8 @@ export function ChatInput({
   )
 
   return (
-    <div className="border-t border-[var(--border-primary)] bg-[var(--bg-primary)] px-4 py-3 sm:px-6 sm:py-4">
-      <div className="relative">
+    <div className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-primary)] p-4">
+      <div className="flex items-end gap-3">
         <textarea
           ref={textareaRef}
           value={value}
@@ -62,8 +62,8 @@ export function ChatInput({
           disabled={disabled}
           rows={1}
           className={cn(
-            "w-full resize-none rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-secondary)]",
-            "py-3 pl-4 pr-12 text-base text-[var(--text-primary)]",
+            "min-w-0 flex-1 resize-none rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-secondary)]",
+            "px-4 py-3 text-base text-[var(--text-primary)]",
             "placeholder:text-[var(--text-tertiary)]",
             "shadow-[var(--shadow-input)]",
             "transition-[border-color,box-shadow] duration-200 ease-[var(--ease-default)]",
@@ -76,7 +76,7 @@ export function ChatInput({
           onClick={handleSend}
           disabled={!canSend}
           className={cn(
-            "absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-full",
+            "flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full",
             "bg-[var(--accent-primary)] text-white",
             "transition-all duration-150 ease-[var(--ease-default)]",
             canSend
