@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, setup_logging
 from app.dependencies import AppException, app_exception_handler
-from app.routers import documents, health, knowledge_bases
+from app.routers import chat, documents, health, knowledge_bases
 
 logger = logging.getLogger(__name__)
 
@@ -45,3 +45,4 @@ app.add_exception_handler(AppException, app_exception_handler)
 app.include_router(health.router)
 app.include_router(knowledge_bases.router)
 app.include_router(documents.router)
+app.include_router(chat.router)

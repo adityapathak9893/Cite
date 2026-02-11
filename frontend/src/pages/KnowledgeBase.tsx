@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header"
 import { Button } from "@/components/ui/button"
 import { DocumentUpload } from "@/components/documents/DocumentUpload"
 import { DocumentList } from "@/components/documents/DocumentList"
+import { ChatWindow } from "@/components/chat/ChatWindow"
 import { cn } from "@/lib/utils"
 import type { KnowledgeBase as KBType, UploadingFile } from "@/types"
 
@@ -76,12 +77,12 @@ export default function KnowledgeBase() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <div className="mx-auto flex h-full max-w-[1200px] gap-6 p-6">
           {/* Left panel: Documents */}
           <div
             className={cn(
-              "flex flex-col gap-5 lg:w-[420px] lg:shrink-0 lg:block",
+              "flex flex-col gap-5 overflow-y-auto lg:w-[420px] lg:shrink-0",
               // Mobile: toggle visibility based on active tab
               activeTab === "documents" ? "w-full" : "hidden"
             )}
@@ -94,25 +95,17 @@ export default function KnowledgeBase() {
             <DocumentList kbId={kbId} uploadingFiles={uploadingFiles} />
           </div>
 
-          {/* Right panel: Chat placeholder */}
+          {/* Right panel: Chat */}
           <div
             className={cn(
-              "flex-1 flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border-secondary)] bg-[var(--bg-secondary)] lg:flex",
-              // Mobile: toggle visibility based on active tab
+              "flex-1 min-h-0 lg:flex",
               activeTab === "chat" ? "flex" : "hidden"
             )}
           >
-            <MessageSquare
-              size={32}
-              strokeWidth={1.75}
-              className="text-[var(--text-tertiary)] mb-3"
+            <ChatWindow
+              kbId={kbId}
+              kbName={kb?.name ?? "Knowledge Base"}
             />
-            <p className="text-sm text-[var(--text-secondary)]">
-              Chat will be available in Phase 4
-            </p>
-            <p className="text-xs text-[var(--text-tertiary)] mt-1">
-              Upload documents first, then ask questions about them.
-            </p>
           </div>
         </div>
       </div>

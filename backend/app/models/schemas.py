@@ -63,3 +63,38 @@ class DocumentResponse(BaseModel):
     error_message: str | None
     chunk_count: int
     created_at: datetime
+
+
+# ─── Chat schemas ───
+
+
+class ChatMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=10000)
+    conversation_id: str | None = None
+
+
+class SourceItem(BaseModel):
+    document_id: str
+    file_name: str
+    chunk_index: int
+    content: str
+    similarity: float
+
+
+class MessageResponse(BaseModel):
+    id: str
+    conversation_id: str
+    role: str
+    content: str
+    sources: list[SourceItem]
+    created_at: datetime
+
+
+class ConversationResponse(BaseModel):
+    id: str
+    knowledge_base_id: str
+    user_id: str | None
+    title: str | None
+    is_widget: bool
+    share_token: str
+    created_at: datetime

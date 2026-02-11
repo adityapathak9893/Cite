@@ -19,7 +19,7 @@ export default function Dashboard() {
           </Button>
         }
       />
-      <div className="p-6">
+      <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-[1200px]">
           <KnowledgeBaseList onCreateClick={() => setCreateDialogOpen(true)} />
         </div>
