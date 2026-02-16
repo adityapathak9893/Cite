@@ -4,13 +4,12 @@ from supabase import Client
 
 logger = logging.getLogger(__name__)
 
-# Similarity thresholds — kept low because:
-# 1. Small datasets produce lower cosine similarity scores overall
-# 2. The IVFFlat index with too many lists can miss results
-# 3. Better to send marginal chunks to Claude and let it decide relevance
-#    than to filter them out and return "I don't have enough information"
-DEFAULT_THRESHOLD = 0.2
-RETRY_THRESHOLD = 0.0
+# Similarity thresholds — moderate first-pass, low fallback for small datasets.
+# We fetch extra candidates then trim to MAX_RETURN for precision.
+DEFAULT_THRESHOLD = 0.5
+RETRY_THRESHOLD = 0.3
+CANDIDATE_COUNT = 5   # fetch up to 5 from DB
+MAX_RETURN = 3         # return top 3 to Claude
 
 
 def _call_match_chunks(
@@ -38,7 +37,7 @@ def search_similar_chunks(
     supabase: Client,
     query_embedding: list[float],
     kb_id: str,
-    match_count: int = 5,
+    match_count: int = CANDIDATE_COUNT,
     threshold: float = DEFAULT_THRESHOLD,
 ) -> list[dict]:
     """Search for similar document chunks using the match_chunks PostgreSQL function.
@@ -75,8 +74,8 @@ def search_similar_chunks(
         len(chunks), threshold, kb_id,
     )
 
-    # If fewer than 2 results, retry with lower threshold
-    if len(chunks) < 2 and threshold > RETRY_THRESHOLD:
+    # Only retry on zero results — don't dilute precision with low-similarity chunks
+    if len(chunks) == 0 and threshold > RETRY_THRESHOLD:
         logger.info(
             "Retrying with threshold=%.2f | kb_id=%s", RETRY_THRESHOLD, kb_id
         )
@@ -94,13 +93,6 @@ def search_similar_chunks(
             RETRY_THRESHOLD, kb_id, total_chunks,
         )
         return []
-
-    # Log similarity scores for debugging
-    similarities = [c.get("similarity", 0) for c in chunks]
-    logger.info(
-        "Similarity scores | kb_id=%s | scores=%s",
-        kb_id, [round(s, 3) for s in similarities],
-    )
 
     # Fetch chunk_index (not returned by match_chunks) and file_name
     chunk_ids = [c["id"] for c in chunks]
@@ -126,9 +118,29 @@ def search_similar_chunks(
         chunk["chunk_index"] = index_map.get(chunk["id"], 0)
         chunk["file_name"] = name_map.get(chunk["document_id"], "Unknown")
 
+    # Sort by similarity descending (should already be, but enforce it)
+    chunks.sort(key=lambda c: c.get("similarity", 0), reverse=True)
+
+    # Debug log: every candidate with score + content preview
+    for i, c in enumerate(chunks):
+        logger.info(
+            "Chunk candidate %d | similarity=%.4f | file=%s | section=%d | preview=%s | kb_id=%s",
+            i + 1,
+            c.get("similarity", 0),
+            c.get("file_name", "?"),
+            c.get("chunk_index", 0),
+            c.get("content", "")[:100].replace("\n", " "),
+            kb_id,
+        )
+
+    # Trim to top MAX_RETURN chunks for precision
+    chunks = chunks[:MAX_RETURN]
+
     logger.info(
-        "Found %d similar chunks | kb_id=%s | top_similarity=%.3f",
-        len(chunks), kb_id, chunks[0].get("similarity", 0),
+        "Returning %d chunks (from %d candidates) | kb_id=%s | top=%.3f | bottom=%.3f",
+        len(chunks), len(chunk_ids), kb_id,
+        chunks[0].get("similarity", 0),
+        chunks[-1].get("similarity", 0),
     )
 
     return chunks

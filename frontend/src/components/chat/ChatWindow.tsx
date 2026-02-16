@@ -20,7 +20,7 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
   const { data: conversations } = useConversations(kbId)
   const { data: messages = [], isLoading: isLoadingMessages } =
     useChatMessages(conversationId)
-  const { sendMessage, isStreaming, streamingContent, streamingSources } =
+  const { sendMessage, isStreaming, streamingContent, streamingSources, pendingUserMessage } =
     useSendMessage(kbId)
 
   // Delay showing the loading skeleton by 300ms to avoid flicker on fast loads
@@ -46,7 +46,12 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
 
   const readyDocCount =
     documents?.filter((d) => d.status === "ready").length ?? 0
-  const hasMessages = messages.length > 0 || isStreaming
+  // Show pending user message if it's not already in the messages list (new conversation)
+  const showPendingBubble =
+    pendingUserMessage != null &&
+    !messages.some((m) => m.id === pendingUserMessage.id)
+
+  const hasMessages = messages.length > 0 || isStreaming || showPendingBubble
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -152,6 +157,10 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
+
+            {showPendingBubble && (
+              <MessageBubble key={pendingUserMessage!.id} message={pendingUserMessage!} />
+            )}
 
             {isStreaming && !streamingContent && <StreamingIndicator />}
             {isStreaming && streamingContent && (

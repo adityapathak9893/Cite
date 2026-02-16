@@ -43,6 +43,7 @@ export function useSendMessage(kbId: string) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState("")
   const [streamingSources, setStreamingSources] = useState<Source[]>([])
+  const [pendingUserMessage, setPendingUserMessage] = useState<Message | null>(null)
 
   const isStreamingRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -80,6 +81,9 @@ export function useSendMessage(kbId: string) {
         sources: [],
         created_at: new Date().toISOString(),
       }
+
+      // Always expose the pending message so it renders during streaming
+      setPendingUserMessage(tempUserMsg)
 
       if (conversationId) {
         queryClient.setQueryData<Message[]>(
@@ -235,10 +239,11 @@ export function useSendMessage(kbId: string) {
         setIsStreaming(false)
         setStreamingContent("")
         setStreamingSources([])
+        setPendingUserMessage(null)
       }
     },
     [kbId, queryClient]
   )
 
-  return { sendMessage, isStreaming, streamingContent, streamingSources }
+  return { sendMessage, isStreaming, streamingContent, streamingSources, pendingUserMessage }
 }
