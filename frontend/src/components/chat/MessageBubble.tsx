@@ -4,11 +4,32 @@ import { cn } from "@/lib/utils"
 import type { Message, Source } from "@/types"
 import { SourceCitation } from "./SourceCitation"
 
-/** Strip inline [Source: filename, Section N] citations from assistant text. */
+/**
+ * Clean assistant message text for display:
+ * 1. Strip the ---SOURCES--- block (new format)
+ * 2. Strip inline [Source: ...] citations (legacy format)
+ * 3. Handle partial ---SOURCES--- marker during streaming
+ */
 const SOURCE_CITATION_RE = /\s*\[Source:\s*[^\]]+\]/g
+const SOURCES_BLOCK_RE = /\s*---SOURCES---[\s\S]*?---END_SOURCES---\s*/g
+const PARTIAL_MARKER = "---SOURCES---"
 
-function stripSourceCitations(text: string): string {
-  return text.replace(SOURCE_CITATION_RE, "").trim()
+function cleanMessageText(text: string): string {
+  // Strip complete SOURCES block
+  let cleaned = text.replace(SOURCES_BLOCK_RE, "")
+
+  // Handle partial streaming — if text ends with the start of the marker, trim it
+  for (let i = Math.min(PARTIAL_MARKER.length, cleaned.length); i >= 3; i--) {
+    if (cleaned.endsWith(PARTIAL_MARKER.substring(0, i))) {
+      cleaned = cleaned.substring(0, cleaned.length - i)
+      break
+    }
+  }
+
+  // Strip legacy inline citations
+  cleaned = cleaned.replace(SOURCE_CITATION_RE, "")
+
+  return cleaned.trimEnd()
 }
 
 interface MessageBubbleProps {
@@ -20,7 +41,7 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
   const isUser = message.role === "user"
 
   const displayContent = useMemo(
-    () => (isUser ? message.content : stripSourceCitations(message.content)),
+    () => (isUser ? message.content : cleanMessageText(message.content)),
     [isUser, message.content]
   )
 

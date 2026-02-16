@@ -188,12 +188,17 @@ export function useSendMessage(kbId: string) {
           }
         }
 
+        // Strip ---SOURCES--- block from cached content (backend saves clean text)
+        const cleanContent = fullContent
+          .replace(/\s*---SOURCES---[\s\S]*?---END_SOURCES---\s*/g, "")
+          .trimEnd()
+
         // Build the complete assistant message
         const assistantMsg: Message = {
           id: `msg-${Date.now()}`,
           conversation_id: newConversationId || "",
           role: "assistant",
-          content: fullContent,
+          content: cleanContent,
           sources,
           created_at: new Date().toISOString(),
         }

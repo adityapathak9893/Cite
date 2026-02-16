@@ -24,16 +24,15 @@ export function SourceCitation({ source, index }: SourceCitationProps) {
             Section {source.chunk_index}
           </span>
         </p>
-        {source.title && (
-          <p className="mt-0.5 text-sm font-medium text-[var(--chat-citation-text)]">
+        {source.title ? (
+          <p className="mt-0.5 text-sm font-semibold text-[var(--chat-citation-text)]">
             {source.title}
           </p>
-        )}
-        {source.content && (
+        ) : source.content ? (
           <p className="mt-1 line-clamp-2 font-mono text-xs italic text-[var(--text-secondary)]">
             &ldquo;{source.content}&rdquo;
           </p>
-        )}
+        ) : null}
       </div>
     </div>
   )

@@ -21,93 +21,152 @@ def _get_client() -> anthropic.AsyncAnthropic:
 def build_system_prompt(kb_name: str, context: str) -> str:
     """Build the system prompt with KB instructions and document context."""
     base = (
-        "You are a helpful document assistant. Answer questions using ONLY the document excerpts provided below.\n\n"
-        "Rules:\n"
-        "1. If an excerpt directly answers the question, cite it using [Source: filename, Section N] format\n"
-        "2. ONLY cite excerpts that DIRECTLY contain information answering the question. "
-        "Do not cite excerpts that are merely related to the topic.\n"
-        "3. For each citation, briefly quote the specific phrase (under 20 words) that supports your answer\n"
-        "4. If the answer is not found in any excerpt, say: "
-        "'I don't have enough information in the uploaded documents to answer this question.'\n"
-        "5. Do NOT make up information or use knowledge outside the provided excerpts\n"
-        "6. It is better to cite 1 precise source than 5 vague ones\n"
-        "7. If the question is about the overall document (e.g., 'what topics are covered?'), "
-        "look for the Document Overview section first"
+        "You have thoroughly read and understood all the documents in this knowledge base. "
+        "You are a knowledgeable, helpful expert on these documents.\n\n"
+        "Guidelines:\n"
+        "- Answer naturally and conversationally, as a colleague who has deeply studied these documents would.\n"
+        "- Synthesize information across multiple sections when it gives a better, more complete answer.\n"
+        "- For overview questions (\"what is this about?\", \"summarize this\", \"what should I know?\"), "
+        "provide a comprehensive, well-structured response that demonstrates deep understanding of the entire document. "
+        "Cover all major topics.\n"
+        "- For specific questions, give thorough answers with relevant context. "
+        "Explain what things mean and why they matter, don't just state facts.\n"
+        "- Always ground your answers in the actual document content — never invent facts that aren't in the provided context.\n"
+        "- If the question truly cannot be answered from the provided context, say so naturally like: "
+        "\"The documents don't appear to cover that topic. Based on what's available, the closest related information is...\" "
+        "— NOT a robotic disclaimer like \"I don't have enough information in the uploaded documents.\"\n"
+        "- Do NOT use inline citations like [Source: ...] in your answer text. "
+        "Your response should flow naturally without any citation markers interrupting the text.\n"
+        "- Write in a warm, professional tone. Educate the user. Enhance their understanding. "
+        "Don't just point at text — explain it.\n"
+        "- Use formatting (bold, bullet points, headers) when it helps organize complex information, but keep it natural.\n\n"
+        "CRITICAL — Source Attribution:\n"
+        "At the very end of your response, after your complete answer, add a sources block in this EXACT format:\n\n"
+        "---SOURCES---\n"
+        "[1] {filename} | Section {chunk_index} | \"{title from metadata}\"\n"
+        "[2] {filename} | Section {chunk_index} | \"{title from metadata}\"\n"
+        "---END_SOURCES---\n\n"
+        "Rules for the SOURCES block:\n"
+        "- List EVERY section you drew information from, even partially\n"
+        "- The SOURCES block must ALWAYS be present when you use information from the context\n"
+        "- Use the exact filename, section number (chunk_index), and title from the provided context\n"
+        "- For overview answers that draw from the document structure list, cite the Document Overview section\n"
+        "- The SOURCES block is for machine parsing — it will be stripped from the visible response and shown as citation chips"
     )
 
     if context:
-        return f"{base}\n\n{context}"
-    return base
+        return f"{base}\n\nKnowledge base: {kb_name}\n\n{context}"
+    return f"{base}\n\nKnowledge base: {kb_name}"
 
 
-def build_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into the document excerpts block."""
-    if not chunks:
-        return ""
+def parse_sources_from_response(response_text: str) -> tuple[str, list[dict]]:
+    """Extract and parse the ---SOURCES--- block from Claude's response.
 
-    lines = ["--- Document Excerpts ---"]
-    for i, chunk in enumerate(chunks, 1):
-        file_name = chunk.get("file_name", "Unknown")
-        chunk_index = chunk.get("chunk_index", i)
-        content = chunk.get("content", "")
-        lines.append(f"\n[{i}] From: {file_name} (Section {chunk_index})")
-        lines.append(content)
-    lines.append("\n--- End of Excerpts ---")
-
-    return "\n".join(lines)
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Split text into sentences on . ! ? boundaries."""
-    parts = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [s.strip() for s in parts if s.strip()]
-
-
-def _extract_snippet(text: str, query: str, max_len: int = 100) -> str:
-    """Extract the sentence from text that best matches the query by keyword overlap.
-
-    Falls back to the first sentence if no good match is found.
+    Returns (clean_text, parsed_sources).
     """
-    text = text.strip()
-    if not text:
-        return ""
+    sources: list[dict] = []
+    clean_text = response_text
 
-    sentences = _split_sentences(text)
-    if not sentences:
-        return text[:max_len]
+    sources_start = response_text.find("---SOURCES---")
+    sources_end = response_text.find("---END_SOURCES---")
 
-    # Build query keywords (lowercase, skip short words)
-    query_words = {w.lower() for w in query.split() if len(w) > 2}
+    if sources_start != -1 and sources_end != -1:
+        clean_text = response_text[:sources_start].rstrip()
 
-    best_sentence = sentences[0]
-    best_score = -1
+        sources_block = response_text[
+            sources_start + len("---SOURCES---"):sources_end
+        ].strip()
 
-    for sentence in sentences:
-        words = {w.lower().strip(".,!?;:'\"") for w in sentence.split()}
-        score = len(words & query_words)
-        if score > best_score:
-            best_score = score
-            best_sentence = sentence
+        for line in sources_block.split("\n"):
+            line = line.strip()
+            if not line or not line.startswith("["):
+                continue
+            try:
+                # Parse: [1] filename.pdf | Section 5 | "Title Here"
+                content = line.split("]", 1)[1].strip()
+                parts = [p.strip() for p in content.split("|")]
+                if len(parts) >= 3:
+                    filename = parts[0]
+                    section_str = parts[1]  # "Section 5"
+                    section_num = (
+                        int("".join(filter(str.isdigit, section_str)))
+                        if any(c.isdigit() for c in section_str)
+                        else 0
+                    )
+                    title = parts[2].strip('"').strip("'")
 
-    # Truncate at word boundary if needed
-    if len(best_sentence) <= max_len:
-        return best_sentence
-    truncated = best_sentence[:max_len].rsplit(" ", 1)[0]
-    return truncated + "…"
+                    sources.append({
+                        "file_name": filename,
+                        "chunk_index": section_num,
+                        "title": title,
+                    })
+            except (ValueError, IndexError):
+                continue
+
+    return clean_text, sources
+
+
+def _match_parsed_sources(
+    parsed_sources: list[dict],
+    chunks: list[dict],
+) -> list[dict]:
+    """Match Claude's parsed sources against original chunks to fill in document_id, similarity.
+
+    Falls back to parsed source data if no chunk match found.
+    """
+    # Build lookup: (file_name, chunk_index) → chunk
+    chunk_lookup: dict[tuple[str, int], dict] = {}
+    for chunk in chunks:
+        key = (chunk.get("file_name", ""), chunk.get("chunk_index", 0))
+        chunk_lookup[key] = chunk
+
+    matched: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+
+    for src in parsed_sources:
+        key = (src["file_name"], src["chunk_index"])
+        if key in seen:
+            continue
+        seen.add(key)
+
+        chunk = chunk_lookup.get(key)
+        if chunk:
+            matched.append({
+                "document_id": chunk.get("document_id", ""),
+                "file_name": src["file_name"],
+                "chunk_index": src["chunk_index"],
+                "content": "",
+                "similarity": chunk.get("similarity", 0),
+                "title": src.get("title", ""),
+            })
+        else:
+            matched.append({
+                "document_id": "",
+                "file_name": src["file_name"],
+                "chunk_index": src["chunk_index"],
+                "content": "",
+                "similarity": 0,
+                "title": src.get("title", ""),
+            })
+
+    return matched
 
 
 async def stream_chat_response(
     kb_name: str,
     messages: list[dict],
     chunks: list[dict],
+    context: str,
 ) -> AsyncGenerator[dict, None]:
     """Stream Claude's response token by token.
 
     Yields dicts:
       {"token": "...", "done": false}   — for each text delta
       {"token": "", "done": true, "sources": [...], "full_response": "..."}  — at end
+
+    The full_response in the final event is the CLEAN text (SOURCES block stripped).
+    Sources are parsed from Claude's ---SOURCES--- block and matched against chunks.
     """
-    context = build_context(chunks)
     system_prompt = build_system_prompt(kb_name, context)
 
     client = _get_client()
@@ -132,29 +191,20 @@ async def stream_chat_response(
         yield {"token": "", "done": True, "sources": [], "full_response": error_msg}
         return
 
-    # Extract user query for keyword-matched snippet
-    user_query = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            user_query = m.get("content", "")
-            break
+    # Parse ---SOURCES--- block from Claude's response
+    clean_text, parsed_sources = parse_sources_from_response(full_response)
 
-    # Build sources from the retrieved chunks
-    sources = []
-    for chunk in chunks:
-        metadata = chunk.get("metadata") or {}
-        sources.append({
-            "document_id": chunk.get("document_id", ""),
-            "file_name": chunk.get("file_name", "Unknown"),
-            "chunk_index": chunk.get("chunk_index", 0),
-            "content": _extract_snippet(chunk.get("content", ""), user_query),
-            "similarity": chunk.get("similarity", 0),
-            "title": metadata.get("title", ""),
-        })
+    logger.info(
+        "Parsed %d sources from Claude response | kb=%s",
+        len(parsed_sources), kb_name,
+    )
+
+    # Match parsed sources against original chunks for document_id, similarity
+    sources = _match_parsed_sources(parsed_sources, chunks)
 
     yield {
         "token": "",
         "done": True,
         "sources": sources,
-        "full_response": full_response,
+        "full_response": clean_text,
     }

@@ -11,6 +11,124 @@ RETRY_THRESHOLD = 0.3
 CANDIDATE_COUNT = 8   # fetch up to 8 from DB
 MAX_RETURN = 5         # return top 5 to Claude (AI chunks are more precise)
 
+# ─── Overview question detection ───
+
+OVERVIEW_KEYWORDS = [
+    "what is this", "what's this", "about this doc", "about this document",
+    "summary", "summarize", "overview", "main topics", "key topics",
+    "what should i know", "what do i need to know", "tell me about",
+    "tell me what", "what does this cover", "what's covered", "key points",
+    "highlights", "table of contents", "what are the sections",
+    "what topics", "give me an overview", "walk me through",
+    "what's in this", "what is in this", "brief me", "catch me up",
+]
+
+
+def is_overview_question(question: str) -> bool:
+    """Detect whether the user is asking an overview/summary question."""
+    question_lower = question.lower().strip()
+    return any(keyword in question_lower for keyword in OVERVIEW_KEYWORDS)
+
+
+# ─── Document structure for overview questions ───
+
+
+def get_document_structure(supabase: Client, kb_id: str) -> dict:
+    """Fetch summary chunk and all section titles for overview questions."""
+    result = (
+        supabase.table("document_chunks")
+        .select("chunk_index, content, metadata")
+        .eq("knowledge_base_id", kb_id)
+        .order("chunk_index")
+        .execute()
+    )
+
+    summary_content = None
+    section_titles: list[dict] = []
+
+    for chunk in (result.data or []):
+        metadata = chunk.get("metadata") or {}
+
+        if metadata.get("is_summary") is True:
+            summary_content = chunk["content"]
+
+        title = metadata.get("title", f"Section {chunk['chunk_index']}")
+        if not metadata.get("is_summary"):
+            section_titles.append({
+                "index": chunk["chunk_index"],
+                "title": title,
+            })
+
+    logger.info(
+        "Document structure | kb_id=%s | has_summary=%s | sections=%d",
+        kb_id, summary_content is not None, len(section_titles),
+    )
+
+    return {
+        "summary": summary_content,
+        "sections": section_titles,
+    }
+
+
+# ─── Context assembly ───
+
+
+def build_context(
+    chunks: list[dict],
+    document_structure: dict | None = None,
+    is_overview: bool = False,
+) -> str:
+    """Build the document context string for Claude.
+
+    For overview questions: includes document structure + summary + relevant chunks.
+    For specific questions: only relevant chunks.
+
+    Labels chunks as 'Document Knowledge' (not 'Excerpts') so Claude treats them
+    as knowledge it has internalized rather than text to quote.
+    """
+    context_parts: list[str] = []
+
+    if is_overview and document_structure:
+        # Add document structure overview
+        if document_structure["sections"]:
+            context_parts.append("--- Document Structure ---")
+            context_parts.append("This document contains the following sections:")
+            for section in document_structure["sections"]:
+                context_parts.append(f"  {section['index']}. {section['title']}")
+            context_parts.append("--- End Document Structure ---\n")
+
+        # Add summary if available
+        if document_structure.get("summary"):
+            context_parts.append("--- Document Summary ---")
+            context_parts.append(document_structure["summary"])
+            context_parts.append("--- End Document Summary ---\n")
+
+    if not chunks:
+        return "\n".join(context_parts) if context_parts else ""
+
+    # Add relevant chunks as knowledge context
+    context_parts.append("--- Document Knowledge ---")
+    context_parts.append(
+        "The following sections from the knowledge base are relevant:\n"
+    )
+
+    for i, chunk in enumerate(chunks):
+        metadata = chunk.get("metadata") or {}
+        filename = chunk.get("file_name", "Unknown")
+        title = metadata.get("title", f"Section {chunk.get('chunk_index', i)}")
+        chunk_index = chunk.get("chunk_index", i)
+
+        context_parts.append(f"[Section {chunk_index}] {filename} — \"{title}\"")
+        context_parts.append(chunk.get("content", ""))
+        context_parts.append("")  # blank line between sections
+
+    context_parts.append("--- End Document Knowledge ---")
+
+    return "\n".join(context_parts)
+
+
+# ─── Vector search ───
+
 
 def _call_match_chunks(
     supabase: Client,

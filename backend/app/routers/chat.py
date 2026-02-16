@@ -15,7 +15,12 @@ from app.models.schemas import (
 )
 from app.services.claude import stream_chat_response
 from app.services.embedding import embed_texts
-from app.services.rag import search_similar_chunks
+from app.services.rag import (
+    build_context,
+    get_document_structure,
+    is_overview_question,
+    search_similar_chunks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +135,27 @@ async def chat(
             len(query_embedding), request_id,
         )
 
+        # Detect overview questions for enhanced context
+        overview = is_overview_question(body.message)
+
+        # Fetch document structure for overview questions
+        document_structure = None
+        if overview:
+            document_structure = get_document_structure(supabase, kb_id)
+            logger.info(
+                "Overview question detected | kb_id=%s | has_structure=%s | request_id=%s",
+                kb_id, document_structure is not None, request_id,
+            )
+
         # Search for similar chunks
         chunks = search_similar_chunks(supabase, query_embedding, kb_id)
+
+        # Build context for Claude
+        context = build_context(
+            chunks=chunks,
+            document_structure=document_structure,
+            is_overview=overview,
+        )
 
         # Get last 6 messages for context (current user msg + 5 prior)
         history_result = (
@@ -149,22 +173,22 @@ async def chat(
         ]
 
         logger.info(
-            "Chat request | conv_id=%s | kb_id=%s | chunks=%d | history=%d | request_id=%s",
-            conversation_id, kb_id, len(chunks), len(messages_for_claude), request_id,
+            "Chat request | conv_id=%s | kb_id=%s | chunks=%d | overview=%s | history=%d | request_id=%s",
+            conversation_id, kb_id, len(chunks), overview, len(messages_for_claude), request_id,
         )
 
         # Build SSE generator
         async def event_generator():
             try:
-                if not chunks:
-                    # No relevant chunks — return canned response
+                # For non-overview questions with zero chunks, use canned response
+                if not overview and not chunks:
                     canned = (
-                        "I don't have enough information in the uploaded "
-                        "documents to answer this question."
+                        "I wasn't able to find any relevant sections in the documents "
+                        "for your question. Could you try rephrasing, or ask about a "
+                        "specific topic covered in the uploaded documents?"
                     )
                     yield f"data: {json.dumps({'token': canned, 'done': False})}\n\n"
 
-                    # Save canned assistant message
                     msg_result = (
                         supabase.table("messages")
                         .insert({
@@ -184,12 +208,12 @@ async def chat(
                 full_response = ""
                 sources: list[dict] = []
 
-                async for event in stream_chat_response(kb_name, messages_for_claude, chunks):
+                async for event in stream_chat_response(kb_name, messages_for_claude, chunks, context):
                     if event["done"]:
                         sources = event.get("sources", [])
                         full_response = event.get("full_response", "")
 
-                        # Save assistant message with sources
+                        # Save clean text (SOURCES block already stripped) + parsed sources
                         msg_result = (
                             supabase.table("messages")
                             .insert({
