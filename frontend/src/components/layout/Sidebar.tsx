@@ -159,10 +159,10 @@ export function Sidebar() {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed top-0 left-0 z-40 h-screen bg-[var(--bg-secondary)] border-r border-[var(--border-primary)] transition-all duration-200",
-          // Mobile: hidden by default, slides in
+          "fixed top-0 left-0 z-40 h-screen bg-[var(--bg-secondary)] border-r border-[var(--border-primary)] transition-transform duration-200",
+          // Mobile: hidden by default, slides in — capped at 280px
           mobileOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:translate-x-0 lg:static",
+          "max-w-[280px] lg:max-w-none lg:translate-x-0 lg:static",
           collapsed ? "w-16" : "w-[260px]"
         )}
       >

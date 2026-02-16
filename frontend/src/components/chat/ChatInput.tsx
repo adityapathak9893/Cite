@@ -48,7 +48,7 @@ export function ChatInput({
   )
 
   return (
-    <div className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-primary)] p-4">
+    <div className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-4">
       <div className="flex items-end gap-3">
         <textarea
           ref={textareaRef}

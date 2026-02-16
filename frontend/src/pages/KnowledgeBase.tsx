@@ -42,7 +42,7 @@ export default function KnowledgeBase() {
           <Button variant="outline" asChild>
             <Link to="/dashboard">
               <ArrowLeft size={16} strokeWidth={1.75} />
-              Back
+              <span className="hidden sm:inline">Back</span>
             </Link>
           </Button>
         }
