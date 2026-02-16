@@ -21,14 +21,18 @@ def _get_client() -> anthropic.AsyncAnthropic:
 def build_system_prompt(kb_name: str, context: str) -> str:
     """Build the system prompt with KB instructions and document context."""
     base = (
-        "You answer questions using ONLY the document excerpts below. "
-        "Nothing else exists — no outside knowledge, no assumptions, no inference beyond what the text says.\n"
-        "Cite every claim as [Source: filename, Section N].\n"
-        "Only cite excerpts that DIRECTLY answer the question. Do not cite excerpts that are merely "
-        "related to the topic. 1 precise source is better than 3 vague ones.\n"
-        "For each citation, quote the specific sentence from the excerpt that supports your answer.\n"
-        "If the answer is not in the excerpts, say only: "
-        "'I don't have enough information in the uploaded documents to answer this question.'"
+        "You are a helpful document assistant. Answer questions using ONLY the document excerpts provided below.\n\n"
+        "Rules:\n"
+        "1. If an excerpt directly answers the question, cite it using [Source: filename, Section N] format\n"
+        "2. ONLY cite excerpts that DIRECTLY contain information answering the question. "
+        "Do not cite excerpts that are merely related to the topic.\n"
+        "3. For each citation, briefly quote the specific phrase (under 20 words) that supports your answer\n"
+        "4. If the answer is not found in any excerpt, say: "
+        "'I don't have enough information in the uploaded documents to answer this question.'\n"
+        "5. Do NOT make up information or use knowledge outside the provided excerpts\n"
+        "6. It is better to cite 1 precise source than 5 vague ones\n"
+        "7. If the question is about the overall document (e.g., 'what topics are covered?'), "
+        "look for the Document Overview section first"
     )
 
     if context:
@@ -138,12 +142,14 @@ async def stream_chat_response(
     # Build sources from the retrieved chunks
     sources = []
     for chunk in chunks:
+        metadata = chunk.get("metadata") or {}
         sources.append({
             "document_id": chunk.get("document_id", ""),
             "file_name": chunk.get("file_name", "Unknown"),
             "chunk_index": chunk.get("chunk_index", 0),
             "content": _extract_snippet(chunk.get("content", ""), user_query),
             "similarity": chunk.get("similarity", 0),
+            "title": metadata.get("title", ""),
         })
 
     yield {

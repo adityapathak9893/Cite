@@ -79,6 +79,7 @@ class SourceItem(BaseModel):
     chunk_index: int
     content: str
     similarity: float
+    title: str = ""
 
 
 class MessageResponse(BaseModel):

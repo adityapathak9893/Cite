@@ -8,7 +8,7 @@ from supabase import Client
 from app.config import get_settings
 from app.dependencies import AppException, get_current_user, get_supabase
 from app.models.schemas import DocumentResponse
-from app.services.chunking import chunk_text
+from app.services.chunking import chunk_document
 from app.services.embedding import embed_texts
 from app.services.extraction import extract_text
 
@@ -233,6 +233,7 @@ async def upload_document(
             doc_id=doc_id,
             kb_id=kb_id,
             file_bytes=file_bytes,
+            file_name=filename,
             mime_type=mime_type,
             supabase_url=settings.supabase_url,
             supabase_key=settings.supabase_service_key,
@@ -409,11 +410,12 @@ async def process_document(
     doc_id: str,
     kb_id: str,
     file_bytes: bytes,
+    file_name: str,
     mime_type: str,
     supabase_url: str,
     supabase_key: str,
 ) -> None:
-    """Background task: extract → chunk → embed → store."""
+    """Background task: extract → AI chunk → embed (combined text) → store."""
     from supabase import create_client
 
     supabase = create_client(supabase_url, supabase_key)
@@ -442,24 +444,40 @@ async def process_document(
             logger.warning("No text extracted | doc_id=%s", doc_id)
             return
 
-        # 2. Chunk text
-        logger.info("Processing document | doc_id=%s | step=chunking", doc_id)
-        chunks = chunk_text(text)
+        # 2. AI-powered intelligent chunking
+        logger.info("Processing document | doc_id=%s | step=chunking (AI)", doc_id)
+        chunks = await chunk_document(text, file_name)
 
         if not chunks:
             _set_status("failed", "Could not split document into chunks.")
             logger.warning("No chunks produced | doc_id=%s", doc_id)
             return
 
-        # 3. Generate embeddings
+        logger.info(
+            "Chunking complete | doc_id=%s | chunks=%d | titles=%s",
+            doc_id,
+            len(chunks),
+            [c.get("metadata", {}).get("title", "?") for c in chunks],
+        )
+
+        # 3. Generate embeddings using COMBINED text (search_description + content)
+        # This improves retrieval because the embedding captures both keywords and full content
         logger.info(
             "Processing document | doc_id=%s | step=embedding | chunks=%d",
             doc_id, len(chunks),
         )
-        chunk_texts = [c["content"] for c in chunks]
-        embeddings = await embed_texts(chunk_texts)
+        combined_texts = []
+        for c in chunks:
+            meta = c.get("metadata", {})
+            description = meta.get("search_description", "")
+            content = c["content"]
+            combined = f"{description}\n\n{content}" if description else content
+            combined_texts.append(combined)
+
+        embeddings = await embed_texts(combined_texts)
 
         # 4. Store chunks + embeddings in document_chunks
+        # NOTE: content stores the ORIGINAL section text, not the combined text
         logger.info("Processing document | doc_id=%s | step=storing_chunks", doc_id)
         rows = []
         for chunk, embedding in zip(chunks, embeddings):

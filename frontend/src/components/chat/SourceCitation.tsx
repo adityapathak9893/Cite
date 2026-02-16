@@ -18,12 +18,17 @@ export function SourceCitation({ source, index }: SourceCitationProps) {
         className="mt-0.5 shrink-0 text-[var(--chat-citation-text)]"
       />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-[var(--chat-citation-text)]">
+        <p className="text-xs text-[var(--chat-citation-text)]">
           {source.file_name}
-          <span className="ml-1.5 font-normal opacity-75">
+          <span className="ml-1.5 opacity-75">
             Section {source.chunk_index}
           </span>
         </p>
+        {source.title && (
+          <p className="mt-0.5 text-sm font-medium text-[var(--chat-citation-text)]">
+            {source.title}
+          </p>
+        )}
         {source.content && (
           <p className="mt-1 line-clamp-2 font-mono text-xs italic text-[var(--text-secondary)]">
             &ldquo;{source.content}&rdquo;

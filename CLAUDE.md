@@ -121,7 +121,7 @@ cite/
 │   │   ├── services/
 │   │   │   ├── __init__.py
 │   │   │   ├── supabase.py    (Supabase client wrapper)
-│   │   │   ├── chunking.py    (text splitting with overlap)
+│   │   │   ├── chunking.py    (AI-powered intelligent document chunking)
 │   │   │   ├── embedding.py   (OpenAI embedding API calls)
 │   │   │   ├── extraction.py  (PDF/TXT text extraction)
 │   │   │   ├── rag.py         (vector search + prompt assembly)
@@ -318,13 +318,32 @@ POST   /api/v1/widget/{kb_id}/chat     → Public chat endpoint for embedded wid
 
 ## RAG Pipeline Details
 
-### Chunking Strategy
+### Chunking Strategy (AI-Powered)
 
 ```
-- Chunk size: ~500 tokens (approximately 2000 characters)
-- Overlap: ~50 tokens (approximately 200 characters)
-- Split boundaries: Prefer paragraph breaks > sentence breaks > word breaks
-- Each chunk stores: content, chunk_index, metadata (file_name, page_number if PDF)
+3-step intelligent chunking pipeline using Claude during document processing:
+
+Step 1 — AI Section Detection (identify_sections):
+- Sends document text to Claude to identify logical section boundaries
+- Each section: title + start/end character positions (200-3000 chars each)
+- For docs > 30,000 chars: AI analyzes first 30k, heuristic splits the rest
+  (splits at double-newlines and heading patterns to keep API costs low)
+- Falls back to fixed-size chunking (2000 chars, 200 overlap) if AI fails
+
+Step 2 — Document Summary (generate_summary):
+- Claude generates a 150-200 word overview from section titles + previews
+- Stored as chunk_index 0 with metadata: {"is_summary": true, "title": "Document Overview"}
+- Answers meta-questions like "What is this document about?"
+- Fallback: concatenates section titles
+
+Step 3 — Search Descriptions (generate_chunk_descriptions):
+- Single Claude call generates keyword-rich one-line descriptions per section
+- Stored in metadata: {"search_description": "anti-bribery FCPA corruption gift policy"}
+- Used to improve embedding quality (see Embedding section below)
+- Fallback: uses section titles
+
+Each chunk stores:
+  content, chunk_index, metadata {title, is_summary, search_description, file_name}
 ```
 
 ### Embedding
@@ -334,6 +353,10 @@ POST   /api/v1/widget/{kb_id}/chat     → Public chat endpoint for embedded wid
 - Dimensions: 1536
 - Batch size: 100 chunks per API call (OpenAI supports batching)
 - Cost: ~$0.02 per million tokens (negligible)
+- IMPORTANT: Embeddings are generated from COMBINED text:
+  "{search_description}\n\n{content}"
+  This captures both keyword descriptions and full content in the vector.
+  The content field in document_chunks stores the ORIGINAL section text only.
 ```
 
 ### Retrieval
@@ -341,21 +364,27 @@ POST   /api/v1/widget/{kb_id}/chat     → Public chat endpoint for embedded wid
 ```
 - Convert user question to embedding using same model
 - Call match_chunks() PostgreSQL function
-- Retrieve top 5 chunks with similarity > 0.7
-- If fewer than 2 chunks match, lower threshold to 0.5 and retry
-- Return chunks sorted by similarity (highest first)
+- Fetch up to 8 candidates with similarity > 0.5
+- If zero results, retry with threshold 0.3
+- Enrich chunks with chunk_index, file_name, and metadata from document_chunks
+- Return top 5 chunks sorted by similarity (highest first)
 ```
 
 ### Prompt Assembly
 
 ```
 System prompt:
-"You are a helpful assistant for {knowledge_base_name}.
-Answer the user's question using ONLY the document excerpts provided below.
-For each claim in your answer, cite the source using [Source: filename, chunk N] format.
-If the answer cannot be found in the provided documents, say:
-'I don't have enough information in the uploaded documents to answer this question.'
-Do NOT make up information. Do NOT use knowledge outside the provided documents."
+"You are a helpful document assistant. Answer questions using ONLY the document excerpts provided below.
+
+Rules:
+1. If an excerpt directly answers the question, cite it using [Source: filename, Section N] format
+2. ONLY cite excerpts that DIRECTLY contain information answering the question
+3. For each citation, briefly quote the specific phrase (under 20 words) that supports your answer
+4. If the answer is not found in any excerpt, say:
+   'I don't have enough information in the uploaded documents to answer this question.'
+5. Do NOT make up information or use knowledge outside the provided excerpts
+6. It is better to cite 1 precise source than 5 vague ones
+7. If the question is about the overall document, look for the Document Overview section first"
 
 Context (injected):
 "--- Document Excerpts ---
@@ -365,7 +394,7 @@ Context (injected):
 [2] From: {filename} (Section {chunk_index})
 {chunk_content}
 
-... (up to 5-8 chunks)
+... (up to 5 chunks)
 --- End of Excerpts ---"
 
 User message:
@@ -788,12 +817,13 @@ DEBUG:   Full request/response bodies, SQL queries, embedding vectors —
 **Backend:**
 - Upload endpoint: receives file, stores in Supabase Storage, creates document record with status "uploading"
 - Processing pipeline (triggered after upload):
-  1. Download file from Supabase Storage
-  2. Extract text (PyPDF2 for PDF, plain read for .txt/.md)
-  3. Split into chunks (500 tokens, 50 token overlap)
-  4. Generate embeddings via OpenAI API (batch of 100)
-  5. Store chunks + embeddings in document_chunks table
-  6. Update document status to "ready" (or "failed" with error_message)
+  1. Extract text (PyPDF2 for PDF, plain read for .txt/.md)
+  2. AI-powered chunking: Claude identifies sections → generates summary → generates search descriptions
+     (falls back to fixed-size 2000-char chunks if AI fails)
+  3. Generate embeddings via OpenAI API (combined search_description + content for each chunk)
+  4. Store chunks + embeddings in document_chunks table (content stores original text, not combined)
+  5. Update document status to "ready" (or "failed" with error_message)
+  - Note: 3 Claude API calls per document during processing (section detection, summary, descriptions)
 - Status endpoint: returns current document processing status
 - Delete endpoint: removes document, chunks, and storage file
 
@@ -937,6 +967,8 @@ docker run -p 8000:8000 --env-file .env cite-backend
 - The widget endpoint is PUBLIC — implement rate limiting before deploy
 - Streaming responses use Server-Sent Events (SSE), not WebSockets
 - For PDF extraction, use PyPDF2 (simple, reliable) — not heavy libraries like pdfplumber
-- Chunk overlap prevents losing context at chunk boundaries
+- Document chunking uses AI (Claude) to identify logical sections — falls back to fixed-size if AI fails
+- Embeddings are generated from combined text (search_description + content), but only original content is stored in document_chunks
+- Existing documents must be deleted and re-uploaded to benefit from new chunking — old chunks are not auto-migrated
 - The ivfflat index on embeddings requires at least ~100 rows to be effective. For small datasets during development, it still works but may not be as fast
 - All dates are stored and returned in UTC (timestamptz)

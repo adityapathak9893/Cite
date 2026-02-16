@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 # We fetch extra candidates then trim to MAX_RETURN for precision.
 DEFAULT_THRESHOLD = 0.5
 RETRY_THRESHOLD = 0.3
-CANDIDATE_COUNT = 5   # fetch up to 5 from DB
-MAX_RETURN = 3         # return top 3 to Claude
+CANDIDATE_COUNT = 8   # fetch up to 8 from DB
+MAX_RETURN = 5         # return top 5 to Claude (AI chunks are more precise)
 
 
 def _call_match_chunks(
@@ -100,11 +100,12 @@ def search_similar_chunks(
 
     chunk_details = (
         supabase.table("document_chunks")
-        .select("id, chunk_index")
+        .select("id, chunk_index, metadata")
         .in_("id", chunk_ids)
         .execute()
     )
     index_map = {d["id"]: d["chunk_index"] for d in (chunk_details.data or [])}
+    metadata_map = {d["id"]: (d.get("metadata") or {}) for d in (chunk_details.data or [])}
 
     docs_result = (
         supabase.table("documents")
@@ -117,18 +118,21 @@ def search_similar_chunks(
     for chunk in chunks:
         chunk["chunk_index"] = index_map.get(chunk["id"], 0)
         chunk["file_name"] = name_map.get(chunk["document_id"], "Unknown")
+        chunk["metadata"] = metadata_map.get(chunk["id"], {})
 
     # Sort by similarity descending (should already be, but enforce it)
     chunks.sort(key=lambda c: c.get("similarity", 0), reverse=True)
 
     # Debug log: every candidate with score + content preview
     for i, c in enumerate(chunks):
+        meta = c.get("metadata") or {}
         logger.info(
-            "Chunk candidate %d | similarity=%.4f | file=%s | section=%d | preview=%s | kb_id=%s",
+            "Chunk candidate %d | similarity=%.4f | file=%s | section=%d | title=%s | preview=%s | kb_id=%s",
             i + 1,
             c.get("similarity", 0),
             c.get("file_name", "?"),
             c.get("chunk_index", 0),
+            meta.get("title", "?"),
             c.get("content", "")[:100].replace("\n", " "),
             kb_id,
         )

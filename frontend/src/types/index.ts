@@ -48,6 +48,7 @@ export interface Source {
   chunk_index: number
   content: string
   similarity: number
+  title: string
 }
 
 export interface UploadingFile {
