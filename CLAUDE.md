@@ -124,8 +124,8 @@ cite/
 │   │   │   ├── chunking.py    (AI-powered intelligent document chunking)
 │   │   │   ├── embedding.py   (OpenAI embedding API calls)
 │   │   │   ├── extraction.py  (PDF/TXT text extraction)
-│   │   │   ├── rag.py         (vector search + prompt assembly)
-│   │   │   └── claude.py      (Claude API streaming calls)
+│   │   │   ├── rag.py         (vector search + overview detection + context assembly)
+│   │   │   └── claude.py      (Claude API streaming + SOURCES parsing)
 │   │   └── models/
 │   │       ├── __init__.py
 │   │       └── schemas.py     (Pydantic request/response models)
@@ -362,40 +362,83 @@ Each chunk stores:
 ### Retrieval
 
 ```
+Overview Question Detection (rag.py — is_overview_question):
+- 25+ keyword patterns detect summary/overview questions
+  ("what is this about?", "summarize", "tell me what I need to know", "walk me through", etc.)
+- Overview questions trigger document structure fetch in addition to vector search
+
+Document Structure Fetch (rag.py — get_document_structure):
+- For overview questions only: queries document_chunks table for the KB
+- Extracts the summary chunk (metadata.is_summary = true) and all section titles
+- Returns {summary: "...", sections: [{index, title}, ...]}
+
+Vector Search (rag.py — search_similar_chunks):
 - Convert user question to embedding using same model
 - Call match_chunks() PostgreSQL function
 - Fetch up to 8 candidates with similarity > 0.5
 - If zero results, retry with threshold 0.3
 - Enrich chunks with chunk_index, file_name, and metadata from document_chunks
 - Return top 5 chunks sorted by similarity (highest first)
+
+Context Assembly (rag.py — build_context):
+- Labels chunks as "Document Knowledge" (not "Excerpts") so Claude treats content
+  as internalized knowledge rather than text to parrot back
+- For OVERVIEW questions: Document Structure + Document Summary + Document Knowledge
+- For SPECIFIC questions: Document Knowledge only
+- Each chunk labeled: [Section {chunk_index}] {filename} — "{title}"
+
+No-Chunks Handling:
+- Overview questions ALWAYS go to Claude (even with 0 vector results) because
+  they have document structure context
+- Specific questions with 0 vector results get a friendly canned response
 ```
 
 ### Prompt Assembly
 
 ```
-System prompt:
-"You are a helpful document assistant. Answer questions using ONLY the document excerpts provided below.
+System prompt (claude.py — build_system_prompt):
+- Conversational expert persona: "You have thoroughly read and understood all the
+  documents in this knowledge base. You are a knowledgeable, helpful expert."
+- Instructs Claude to synthesize, explain, and educate — not just quote text
+- For overview questions: cover all major topics comprehensively
+- For specific questions: give thorough answers with context and implications
+- No inline citations: Claude must NOT use [Source: ...] in the response text
+- Graceful no-answer: "The documents don't appear to cover that topic..." instead
+  of robotic "I don't have enough information in the uploaded documents"
 
-Rules:
-1. If an excerpt directly answers the question, cite it using [Source: filename, Section N] format
-2. ONLY cite excerpts that DIRECTLY contain information answering the question
-3. For each citation, briefly quote the specific phrase (under 20 words) that supports your answer
-4. If the answer is not found in any excerpt, say:
-   'I don't have enough information in the uploaded documents to answer this question.'
-5. Do NOT make up information or use knowledge outside the provided excerpts
-6. It is better to cite 1 precise source than 5 vague ones
-7. If the question is about the overall document, look for the Document Overview section first"
+Source Attribution (end-of-response SOURCES block):
+- Claude outputs a machine-parseable block at the end of every response:
+  ---SOURCES---
+  [1] filename.pdf | Section 5 | "Section Title Here"
+  [2] filename.pdf | Section 2 | "Another Title"
+  ---END_SOURCES---
+- Backend parses this block (claude.py — parse_sources_from_response)
+- Parsed sources are matched against original chunks for document_id, similarity
+- Clean text (SOURCES block stripped) is saved to the messages table
+- Frontend strips SOURCES block during streaming and from saved messages
 
-Context (injected):
-"--- Document Excerpts ---
-[1] From: {filename} (Section {chunk_index})
+Context (injected after system prompt):
+"Knowledge base: {kb_name}
+
+--- Document Structure ---          (overview questions only)
+This document contains the following sections:
+  1. Section Title
+  2. Another Section
+--- End Document Structure ---
+
+--- Document Summary ---            (overview questions only)
+{AI-generated 150-200 word summary}
+--- End Document Summary ---
+
+--- Document Knowledge ---
+The following sections from the knowledge base are relevant:
+
+[Section {chunk_index}] {filename} — "{title}"
 {chunk_content}
 
-[2] From: {filename} (Section {chunk_index})
+[Section {chunk_index}] {filename} — "{title}"
 {chunk_content}
-
-... (up to 5 chunks)
---- End of Excerpts ---"
+--- End Document Knowledge ---"
 
 User message:
 "{user's question}"
@@ -406,9 +449,15 @@ User message:
 ```
 - Use Anthropic Python SDK with streaming
 - FastAPI StreamingResponse with text/event-stream content type
-- Frontend uses EventSource or fetch with ReadableStream
+- Frontend uses fetch with ReadableStream
 - Each streamed chunk is sent as SSE: data: {"token": "...", "done": false}
-- Final message includes sources: data: {"token": "", "done": true, "sources": [...]}
+- Claude's response includes ---SOURCES--- block at the end (streamed as normal tokens)
+- Backend parses SOURCES block after stream completes, returns clean text + parsed sources
+- Final SSE event: data: {"token": "", "done": true, "sources": [...], "full_response": "..."}
+  (full_response is clean text with SOURCES block stripped — this is what gets saved to DB)
+- Frontend strips SOURCES block from display during streaming (handles partial markers)
+- Frontend also strips SOURCES block from cached content before adding to query cache
+- Citation chips rendered from parsed sources (not from raw chunks) — only shows what Claude cited
 ```
 
 ## Coding Conventions
@@ -834,24 +883,29 @@ DEBUG:   Full request/response bodies, SQL queries, embedding vectors —
 - Poll document status every 2 seconds while processing
 - Delete document button
 
-### Phase 4: RAG Chat (Day 6-8)
+### Phase 4: RAG Chat — Intelligent Document Assistant (Day 6-8)
 
 **Backend:**
 - Chat endpoint: receives message + knowledge_base_id
   1. Create or continue conversation
   2. Embed the user's question
-  3. Call match_chunks() to find relevant document chunks
-  4. Assemble prompt with system instructions + chunks + question
-  5. Stream Claude's response back via SSE
-  6. After streaming complete, save message + sources to database
+  3. Detect overview questions (is_overview_question) and fetch document structure if needed
+  4. Call match_chunks() to find relevant document chunks
+  5. Assemble context as "Document Knowledge" (overview gets structure + summary too)
+  6. Stream Claude's response back via SSE (conversational expert persona)
+  7. Parse ---SOURCES--- block from Claude's response to extract cited sections
+  8. Save clean text (SOURCES stripped) + parsed sources to database
 - Conversation history: include last 5 messages as context for follow-up questions
-- Source extraction: parse Claude's citations and map to actual document/chunk IDs
+- Source matching: parsed sources matched against original chunks for document_id, similarity
+- Overview questions always go to Claude (even with 0 vector results) — they have structure context
 
 **Frontend:**
 - Chat panel in KB detail page
 - Message list with user and assistant bubbles
 - Streaming text display (tokens appear in real-time)
-- Source citations at bottom of assistant messages (clickable, show source text)
+- SOURCES block stripped during streaming (partial marker detection prevents flash)
+- Citation chips at bottom of assistant messages show section title (not content preview)
+- Fallback to content preview for old messages without title field
 - Chat input with send button and Enter key support
 - Conversation list in sidebar (within KB view)
 - "New conversation" button
@@ -972,3 +1026,8 @@ docker run -p 8000:8000 --env-file .env cite-backend
 - Existing documents must be deleted and re-uploaded to benefit from new chunking — old chunks are not auto-migrated
 - The ivfflat index on embeddings requires at least ~100 rows to be effective. For small datasets during development, it still works but may not be as fast
 - All dates are stored and returned in UTC (timestamptz)
+- Chat uses an intelligent assistant persona — Claude synthesizes and explains, not just quotes. No inline citations; sources appear as chips below the response
+- Claude outputs ---SOURCES--- block at end of response; backend parses it, strips it, saves clean text to DB. Frontend also strips it during streaming as a safety net
+- Overview questions ("what is this about?", "summarize", etc.) get document structure + summary context in addition to vector search results, so Claude can give comprehensive overviews
+- Citation chips show section title (from Claude's parsed sources) instead of content preview. Old messages without title fall back to content preview
+- Sources shown to the user are only the sections Claude actually cited, not all retrieved chunks
