@@ -10,7 +10,9 @@ Businesses upload their documents (PDF, TXT, Markdown). Their teams or customers
 
 ### Key Features
 
-- **Document Q&A with Citations** — AI answers reference exact source documents and sections
+- **Intelligent Document Assistant** — AI synthesizes and explains documents conversationally, not just quoting text. Answers feel like talking to a colleague who has deeply read every document
+- **AI-Powered Smart Chunking** — Claude identifies logical section boundaries during document processing, generates summaries and keyword descriptions for better retrieval
+- **Source Citations** — Citation chips appear below responses showing exactly which sections were used, without interrupting the answer text
 - **Knowledge Bases** — Organize documents into separate collections with independent chat
 - **Streaming Responses** — Real-time token-by-token AI responses via Server-Sent Events
 - **Embeddable Widget** — Drop a `<script>` tag on any website to add document chat
@@ -56,7 +58,7 @@ cite/
 │   │   ├── config.py      Environment variable loading
 │   │   ├── dependencies.py Auth middleware, error handling
 │   │   ├── routers/       health, knowledge_bases, documents, chat, widget
-│   │   ├── services/      chunking, embedding, extraction, RAG, Claude
+│   │   ├── services/      AI chunking, embedding, extraction, RAG + overview detection, Claude + SOURCES parsing
 │   │   └── models/        Pydantic request/response schemas
 │   ├── tests/
 │   ├── Dockerfile
@@ -193,15 +195,22 @@ POST   /api/v1/widget/{kb_id}/chat                      Public chat (rate-limite
 
 ## How RAG Works
 
+### Document Processing (at upload time)
+
 1. **Upload** — User uploads a PDF/TXT/MD file
 2. **Extract** — Backend extracts text from the document
-3. **Chunk** — Text is split into ~500-token chunks with 50-token overlap
-4. **Embed** — Each chunk is converted to a 1536-dimension vector via OpenAI
-5. **Store** — Chunks + vectors are stored in Supabase (pgvector)
-6. **Query** — User asks a question, which is also embedded
-7. **Search** — pgvector finds the top 5 most similar chunks (cosine similarity > 0.7)
-8. **Generate** — Claude answers using only the retrieved chunks, citing sources
-9. **Stream** — Response is streamed token-by-token via SSE to the frontend
+3. **AI Chunking** — Claude identifies logical section boundaries (200-3000 chars each), generates a document summary (stored as chunk 0), and creates keyword-rich search descriptions per section. Falls back to fixed-size chunking if AI fails
+4. **Embed** — Each chunk is embedded via OpenAI using combined text (search description + content) for better retrieval
+5. **Store** — Chunks + vectors + metadata (title, summary flag, search description) stored in Supabase pgvector
+
+### Chat (at query time)
+
+6. **Query** — User asks a question, which is embedded using the same model
+7. **Overview Detection** — Backend detects overview questions ("what is this about?", "summarize", etc.) and fetches document structure (summary + all section titles) in addition to vector search
+8. **Search** — pgvector finds up to 8 candidates with similarity > 0.5 (retries at 0.3 if zero results), returns top 5
+9. **Context Assembly** — Retrieved chunks framed as "Document Knowledge" (not "Excerpts") so Claude treats them as internalized knowledge. Overview questions also get document structure and summary
+10. **Generate** — Claude answers as an intelligent document expert: synthesizes across sections, explains concepts, uses formatting. Outputs a machine-parseable `---SOURCES---` block at the end listing cited sections
+11. **Parse & Stream** — Response streamed token-by-token via SSE. Backend parses SOURCES block after stream completes, strips it from saved text, and returns parsed sources as citation chips
 
 ## Running Tests
 
@@ -233,9 +242,9 @@ docker run -p 8000:8000 --env-file .env cite-backend
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1 | Complete | Backend skeleton + Frontend skeleton + Auth |
-| 2 | Not started | Knowledge Base CRUD |
-| 3 | Not started | Document Upload + Processing |
-| 4 | Not started | RAG Chat with Streaming |
+| 2 | Complete | Knowledge Base CRUD |
+| 3 | Complete | Document Upload + AI-Powered Smart Chunking |
+| 4 | Complete | RAG Chat — Intelligent Document Assistant |
 | 5 | Not started | Landing Page + Polish + Deploy |
 | 6 | Not started | Embeddable Widget |
 | 7 | Not started | Final Polish |
