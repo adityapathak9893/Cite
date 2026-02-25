@@ -910,48 +910,39 @@ The widget must look premium even when embedded on ugly third-party sites.
 
 ## Implementation Notes for Claude Code
 
-### Tailwind CSS Custom Configuration
+### Tailwind CSS v4 Configuration
 
-All the design tokens above should be mapped to a `tailwind.config.ts` extending the default theme:
+**IMPORTANT:** This project uses **Tailwind CSS v4**, which configures design tokens via CSS `@theme inline` in `globals.css` — NOT via `tailwind.config.ts`.
 
-```typescript
-// tailwind.config.ts — SKELETON
-export default {
-  darkMode: ['class', '[data-theme="dark"]'],
-  theme: {
-    extend: {
-      colors: {
-        // Map all --accent-primary, --color-success, etc. to Tailwind classes
-        brand: {
-          DEFAULT: '#4F6BF5',
-          hover: '#3B54D4',
-          light: '#EEF1FE',
-          ghost: 'rgba(79, 107, 245, 0.08)',
-        },
-        // ... etc
-      },
-      fontFamily: {
-        display: ['Instrument Serif', 'Georgia', 'serif'],
-        body: ['General Sans', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-      },
-      borderRadius: {
-        sm: '6px',
-        DEFAULT: '8px',
-        lg: '12px',
-        xl: '16px',
-      },
-      boxShadow: {
-        // Map all --shadow-* tokens
-      },
-      animation: {
-        'cursor-blink': 'blink 1s step-end infinite',
-        'dot-pulse': 'pulse 1.2s ease-in-out infinite',
-      },
-    },
-  },
-};
+Dark mode uses a custom variant:
+```css
+@custom-variant dark (&:is([data-theme="dark"] *));
 ```
+
+Design tokens are defined as CSS variables in `globals.css` under `@theme inline`:
+```css
+@theme inline {
+  --radius-sm: 0.375rem;    /* 6px */
+  --radius-md: 0.5rem;      /* 8px — default */
+  --radius-lg: 0.75rem;     /* 12px */
+  --radius-xl: 1rem;        /* 16px */
+  --radius-full: 9999px;
+
+  --font-sans: 'General Sans', -apple-system, sans-serif;
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-body: 'General Sans', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Colors mapped as Tailwind color tokens */
+  --color-brand: var(--accent-primary);
+  --color-success: /* mapped from theme variables */;
+  --color-warning: /* mapped from theme variables */;
+  --color-error: /* mapped from theme variables */;
+  /* ... etc */
+}
+```
+
+Light/dark theme values are applied via `:root` and `:root[data-theme="dark"]` CSS variable overrides.
 
 ### shadcn/ui Customization
 

@@ -13,9 +13,9 @@
 
 | Layer | Technology | Why |
 |-------|-----------|-----|
-| Frontend | React 18 + TypeScript + Vite | Owner's core expertise (9 years React) |
-| Styling | Tailwind CSS + shadcn/ui | Fast, consistent, professional UI |
-| Backend | FastAPI (Python 3.11+) | Industry standard for AI backends |
+| Frontend | React 19 + TypeScript + Vite 7 | Owner's core expertise (9 years React) |
+| Styling | Tailwind CSS v4 + shadcn/ui | Fast, consistent, professional UI |
+| Backend | FastAPI (Python 3.13) | Industry standard for AI backends |
 | Database | Supabase (PostgreSQL) | Auth + DB + Storage in one service |
 | Vector Store | Supabase pgvector extension | Vectors in same DB, no extra service |
 | Embeddings | OpenAI text-embedding-3-small (1536 dims) | Industry standard, cheap, fast |
@@ -24,7 +24,7 @@
 | File Storage | Supabase Storage | Same platform, simple integration |
 | Frontend Deploy | Vercel | Best for React/Vite, free tier |
 | Backend Deploy | Railway | Best for Docker/FastAPI, cheap |
-| CI/CD | GitHub Actions | Lint + test + deploy on push to main |
+| CI/CD | GitHub Actions (planned) | Lint + test + deploy on push to main |
 
 ### Monorepo Structure
 
@@ -32,98 +32,88 @@
 cite/
 ├── CLAUDE.md                  (this file)
 ├── README.md
-├── .github/
-│   └── workflows/
-│       ├── frontend.yml       (lint + build + deploy frontend)
-│       └── backend.yml        (lint + test + deploy backend)
+├── UX.md                     (design system spec)
 │
 ├── frontend/
-│   ├── index.html
+│   ├── index.html             (fonts, theme init script, OG tags)
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.ts
-│   ├── components.json        (shadcn/ui config)
+│   ├── tsconfig.app.json
+│   ├── tsconfig.node.json
+│   ├── vite.config.ts         (React + Tailwind CSS v4 plugin)
+│   ├── eslint.config.js
+│   ├── tailwind.config.ts     (exists but NOT used — Tailwind v4 uses CSS @theme)
+│   ├── components.json        (shadcn/ui config — new-york style)
 │   ├── .env.example           (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_URL)
-│   ├── public/
-│   │   └── widget.js          (embeddable chat widget — Phase 6)
 │   └── src/
 │       ├── main.tsx
-│       ├── App.tsx
+│       ├── App.tsx            (BrowserRouter + lazy-loaded routes)
 │       ├── lib/
 │       │   ├── supabase.ts    (Supabase client init)
-│       │   ├── api.ts         (axios/fetch wrapper for backend calls)
-│       │   └── utils.ts       (helpers)
+│       │   ├── api.ts         (fetch-based API client with auth headers)
+│       │   └── utils.ts       (cn() helper — clsx + tailwind-merge)
 │       ├── hooks/
 │       │   ├── useAuth.ts     (login, signup, logout, session)
 │       │   ├── useKnowledgeBases.ts
-│       │   ├── useDocuments.ts
-│       │   └── useChat.ts     (send message, receive stream)
+│       │   ├── useDocuments.ts (polling while processing)
+│       │   └── useChat.ts     (streaming SSE, conversations, messages)
 │       ├── components/
-│       │   ├── ui/            (shadcn/ui components — button, input, card, etc.)
+│       │   ├── ui/            (shadcn/ui — button, input, textarea, label, card, dialog, theme-toggle, sonner)
 │       │   ├── layout/
-│       │   │   ├── AppLayout.tsx      (sidebar + main content)
-│       │   │   ├── Sidebar.tsx
+│       │   │   ├── AppLayout.tsx      (sidebar + main content outlet)
+│       │   │   ├── Sidebar.tsx        (logo, nav, theme toggle, user area, mobile hamburger)
 │       │   │   └── Header.tsx
 │       │   ├── auth/
 │       │   │   ├── LoginForm.tsx
 │       │   │   ├── SignupForm.tsx
 │       │   │   └── ProtectedRoute.tsx
 │       │   ├── dashboard/
-│       │   │   ├── KnowledgeBaseList.tsx
-│       │   │   ├── KnowledgeBaseCard.tsx
+│       │   │   ├── KnowledgeBaseList.tsx  (grid + skeleton loading)
+│       │   │   ├── KnowledgeBaseCard.tsx  (card + delete confirmation)
 │       │   │   └── CreateKBDialog.tsx
 │       │   ├── documents/
 │       │   │   ├── DocumentUpload.tsx  (drag-and-drop upload area)
-│       │   │   ├── DocumentList.tsx
-│       │   │   ├── DocumentItem.tsx    (shows name, status, chunk count)
-│       │   │   └── ProcessingStatus.tsx
-│       │   ├── chat/
-│       │   │   ├── ChatWindow.tsx      (main chat container)
-│       │   │   ├── MessageList.tsx
-│       │   │   ├── MessageBubble.tsx   (user vs assistant styling)
-│       │   │   ├── SourceCitation.tsx  (clickable source references)
-│       │   │   ├── ChatInput.tsx       (text input + send button)
-│       │   │   └── StreamingIndicator.tsx
-│       │   ├── landing/
-│       │   │   ├── LandingPage.tsx
-│       │   │   ├── Hero.tsx
-│       │   │   ├── Features.tsx
-│       │   │   └── CTA.tsx
-│       │   └── widget/
-│       │       └── WidgetConfigurator.tsx (generates embed code for users)
+│       │   │   └── DocumentList.tsx    (list with status badges, delete, inline items)
+│       │   └── chat/
+│       │       ├── ChatWindow.tsx      (main chat container + conversation selector)
+│       │       ├── MessageBubble.tsx   (user vs assistant styling + Markdown rendering)
+│       │       ├── SourceCitation.tsx  (clickable source references)
+│       │       ├── ChatInput.tsx       (auto-height textarea + send button)
+│       │       ├── StreamingIndicator.tsx (3-dot pulsing animation)
+│       │       └── SuggestionChips.tsx (contextual suggestions on empty chat)
 │       ├── pages/
-│       │   ├── Landing.tsx
+│       │   ├── Landing.tsx            (full marketing page — hero, features, how-it-works, CTA, footer)
 │       │   ├── Login.tsx
 │       │   ├── Signup.tsx
 │       │   ├── Dashboard.tsx
-│       │   ├── KnowledgeBase.tsx       (single KB view — documents + chat)
-│       │   └── SharedChat.tsx          (public shareable chat page)
+│       │   └── KnowledgeBase.tsx      (single KB view — documents + chat, mobile tabs)
+│       ├── styles/
+│       │   ├── globals.css            (Tailwind v4 @theme, light/dark CSS variables, base resets)
+│       │   ├── fonts.css              (General Sans @font-face from Fontshare)
+│       │   └── animations.css         (keyframes for cursor-blink, dot-pulse, etc.)
 │       └── types/
 │           └── index.ts               (TypeScript interfaces for all entities)
 │
 ├── backend/
-│   ├── Dockerfile
+│   ├── Dockerfile             (Python 3.13-slim)
 │   ├── requirements.txt
 │   ├── .env.example           (SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY)
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py            (FastAPI app, CORS, lifespan, middleware)
-│   │   ├── config.py          (pydantic Settings, env var loading)
-│   │   ├── dependencies.py    (get_current_user, get_supabase, etc.)
+│   │   ├── config.py          (pydantic Settings, env var loading, logging setup)
+│   │   ├── dependencies.py    (get_current_user, get_supabase, AppException handler)
 │   │   ├── routers/
 │   │   │   ├── __init__.py
 │   │   │   ├── health.py      (GET /health — basic health check)
 │   │   │   ├── knowledge_bases.py  (CRUD for knowledge bases)
-│   │   │   ├── documents.py   (upload, process, status)
-│   │   │   ├── chat.py        (RAG query + streaming response)
-│   │   │   └── widget.py      (public chat endpoint for embedded widget — no auth)
+│   │   │   ├── documents.py   (upload, validate, process in background)
+│   │   │   └── chat.py        (RAG query + streaming response + conversations)
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   ├── supabase.py    (Supabase client wrapper)
 │   │   │   ├── chunking.py    (AI-powered intelligent document chunking)
-│   │   │   ├── embedding.py   (OpenAI embedding API calls)
-│   │   │   ├── extraction.py  (PDF/TXT text extraction)
+│   │   │   ├── embedding.py   (OpenAI embedding API calls via httpx)
+│   │   │   ├── extraction.py  (PDF/TXT/MD text extraction)
 │   │   │   ├── rag.py         (vector search + overview detection + context assembly)
 │   │   │   └── claude.py      (Claude API streaming + SOURCES parsing)
 │   │   └── models/
@@ -131,13 +121,19 @@ cite/
 │   │       └── schemas.py     (Pydantic request/response models)
 │   └── tests/
 │       ├── __init__.py
-│       ├── test_health.py
-│       └── test_rag.py
+│       └── test_health.py
+│
+│── (PLANNED — Not yet created) ──
+│
+├── .github/                   (Phase 5 — CI/CD workflows)
+│   └── workflows/
+│       ├── frontend.yml
+│       └── backend.yml
 │
 └── widget/                    (Phase 6 — embeddable widget source)
-    ├── widget.ts              (TypeScript source for the widget)
-    ├── widget.css             (minimal widget styles)
-    └── build.sh               (compiles to frontend/public/widget.js)
+    ├── widget.ts
+    ├── widget.css
+    └── build.sh
 ```
 
 ## Database Schema
@@ -304,8 +300,8 @@ POST   /api/v1/knowledge-bases/{kb_id}/chat                → Send message, get
 GET    /api/v1/knowledge-bases/{kb_id}/conversations        → List conversations
 GET    /api/v1/conversations/{conv_id}/messages             → Get messages in conversation
 
-# Widget (public — no auth, uses KB id + optional rate limiting)
-POST   /api/v1/widget/{kb_id}/chat     → Public chat endpoint for embedded widget
+# Widget (Phase 6 — NOT YET IMPLEMENTED)
+# POST   /api/v1/widget/{kb_id}/chat     → Public chat endpoint for embedded widget
 ```
 
 ### Auth Flow
@@ -464,7 +460,7 @@ User message:
 
 ### Python (Backend)
 
-- Python 3.11+
+- Python 3.13+
 - Use type hints on ALL function signatures
 - Pydantic models for ALL request/response schemas
 - Async functions for all route handlers and service calls
@@ -483,10 +479,15 @@ User message:
 - All API entities defined as TypeScript interfaces in `types/index.ts`
 - Use TanStack Query (React Query) for server state management
 - Use Zustand for minimal client state if needed
-- Tailwind CSS for all styling — no CSS files except for widget
-- shadcn/ui for all UI components — do not build custom buttons, inputs, cards, dialogs
+- **Tailwind CSS v4** for all styling — config via CSS `@theme inline` in `globals.css`, NOT `tailwind.config.ts`
+- Dark mode uses `@custom-variant dark (&:is([data-theme="dark"] *))` — NOT `.dark` class
+- Additional CSS files for Tailwind v4 bootstrap: `globals.css`, `fonts.css`, `animations.css`
+- shadcn/ui (new-york style) for UI components — do not build custom buttons, inputs, cards, dialogs
 - Responsive design — mobile-first approach
 - Loading states and error states for EVERY async operation
+- Lazy-loaded pages via `React.lazy()` + `Suspense` for code splitting
+- Fetch-based API client (no axios) with AbortController for cancellation
+- Sonner for toast notifications
 
 ### General
 
@@ -495,40 +496,6 @@ User message:
 - No console.log in production code — use proper logging
 - Meaningful variable and function names — no abbreviations
 - Comments only when WHY is not obvious from the code
-
-## Security Rules (Non-Negotiable)
-
-### Frontend (PUBLIC — assume attackers can read every line)
-- NEVER store API keys, secrets, or service role keys in frontend code
-- ONLY two env vars allowed in frontend: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (these are PUBLIC by design)
-- ALL business logic runs on the backend — frontend is a thin UI layer
-- Frontend NEVER talks to OpenAI or Anthropic directly — always through backend
-- Frontend NEVER uses the Supabase service role key — only the anon key with RLS
-- No sensitive data in localStorage except the Supabase auth token (handled by Supabase SDK automatically)
-- All API calls from frontend go to YOUR backend (FastAPI), which then talks to third-party services
-
-### Backend (PRIVATE — runs on your server)
-- All secrets loaded from environment variables via pydantic BaseSettings — NEVER hardcoded
-- Supabase service role key stays on backend ONLY
-- OpenAI API key stays on backend ONLY
-- Anthropic API key stays on backend ONLY
-- All user input is validated with Pydantic models before processing
-- All file uploads are validated: check mime type, file size, file extension on backend (don't trust frontend validation)
-- Rate limiting on all public endpoints (especially the widget chat endpoint)
-- CORS restricted to specific origins — not wildcard * (except widget endpoint)
-
-### Data Flow (How it works securely)
-1. User logs in → Supabase Auth gives them a JWT (frontend)
-2. User uploads a doc → Frontend sends file + JWT to FastAPI backend
-3. Backend verifies JWT with Supabase → extracts user_id
-4. Backend processes file → calls OpenAI for embeddings → stores in Supabase
-5. User asks a question → Frontend sends question + JWT to FastAPI backend
-6. Backend verifies JWT → does vector search → calls Claude API → streams response back
-7. Frontend NEVER touches OpenAI or Claude directly
-
-### .env Files
-- .env files are NEVER committed to git — add to .gitignore immediately
-- .env.example files (with placeholder values) ARE committed — so other devs know what's needed
 
 ## Security Rules (Non-Negotiable)
 
@@ -628,10 +595,10 @@ ALL error responses follow this exact structure — no exceptions:
 ## Git Workflow
 
 ### Branch Strategy
-- Main branch: `main` — always deployable, protected
+- Main branch: `master` — always deployable, protected
 - Development branches named by phase: `phase-1/auth-skeleton`, `phase-2/kb-crud`, etc.
 - Feature branches off phase branches if needed: `phase-3/fix-upload-validation`
-- Merge to main only when a phase is complete and tested
+- Merge to master only when a phase is complete and tested
 
 ### Commit Messages (Conventional Commits)
 ```
@@ -914,23 +881,23 @@ DEBUG:   Full request/response bodies, SQL queries, embedding vectors —
 
 ### Phase 5: Landing Page + Polish + Deploy (Day 9-10)
 
-**Frontend:**
-- Landing page at cite.weaverbit.com:
-  - Hero: "Your documents, instantly searchable. AI answers with citations."
-  - How it works: 3 steps (Upload → Ask → Get cited answers)
-  - Feature highlights: Source citations, embeddable widget, secure
-  - CTA: "Get Started Free" → signup
-- Error boundaries and fallback UI
-- Toast notifications for success/error actions
-- Responsive design check (mobile + tablet + desktop)
-- Loading skeletons for all async content
+**Frontend (DONE):**
+- ✅ Landing page implemented as single `pages/Landing.tsx`:
+  - Hero with headline, subheadline, CTA buttons
+  - "How it works" section (3 steps: Upload → Ask → Get cited answers)
+  - Features section with alternating layout
+  - Footer with logo + links
+  - Scroll-triggered reveal animations via IntersectionObserver
+  - Mobile-responsive with hamburger menu
+- ✅ Toast notifications via Sonner
+- ✅ Loading skeletons for KB list
+- ⬜ Error boundaries and fallback UI (remaining polish)
+- ⬜ Comprehensive responsive design audit (remaining polish)
 
-**Deployment:**
-- Frontend → Vercel (connect GitHub repo, set env vars)
-- Backend → Railway (connect GitHub repo, use Dockerfile, set env vars)
-- Configure cite.weaverbit.com DNS: frontend subdomain → Vercel
-- Configure api-cite.weaverbit.com: backend subdomain → Railway
-- Verify everything works in production
+**Deployment (DONE):**
+- ✅ Frontend deployed to Vercel at cite.weaverbit.com
+- ✅ Backend deployed to Railway
+- ⬜ CI/CD via GitHub Actions (`.github/workflows/`) — not yet set up
 
 ### Phase 6: Embeddable Widget (Day 11-13)
 
@@ -1018,7 +985,7 @@ docker run -p 8000:8000 --env-file .env cite-backend
 
 - NEVER use Supabase service key in frontend code — it has admin access
 - ALWAYS use the anon key in frontend — it respects Row Level Security
-- The widget endpoint is PUBLIC — implement rate limiting before deploy
+- The widget endpoint will be PUBLIC (Phase 6, pending) — implement rate limiting before deploy
 - Streaming responses use Server-Sent Events (SSE), not WebSockets
 - For PDF extraction, use PyPDF2 (simple, reliable) — not heavy libraries like pdfplumber
 - Document chunking uses AI (Claude) to identify logical sections — falls back to fixed-size if AI fails
@@ -1031,3 +998,12 @@ docker run -p 8000:8000 --env-file .env cite-backend
 - Overview questions ("what is this about?", "summarize", etc.) get document structure + summary context in addition to vector search results, so Claude can give comprehensive overviews
 - Citation chips show section title (from Claude's parsed sources) instead of content preview. Old messages without title fall back to content preview
 - Sources shown to the user are only the sections Claude actually cited, not all retrieved chunks
+- **Tailwind v4**: Config is in CSS (`globals.css` via `@theme inline`), NOT in `tailwind.config.ts`. The `tailwind.config.ts` file exists but is unused
+- **Dark mode**: Uses `[data-theme="dark"]` attribute, NOT `.dark` class. Custom variant: `@custom-variant dark (&:is([data-theme="dark"] *))`
+- **Fonts**: General Sans loaded via `@font-face` from Fontshare CDN in `fonts.css`; Instrument Serif + JetBrains Mono loaded via Google Fonts `<link>` in `index.html`
+- **React version**: Actually React 19.2.0 (not React 18 as originally planned)
+- **Conversation history**: Backend includes last 6 messages (not 5) as context for follow-up questions
+- **Backend has no `supabase.py` service** — Supabase client is created directly in `dependencies.py`
+- **Backend has no `widget.py` router yet** — widget endpoint is Phase 6 (pending)
+- **Frontend has no separate `MessageList.tsx`, `DocumentItem.tsx`, or `ProcessingStatus.tsx`** — these are handled inline within `ChatWindow.tsx` and `DocumentList.tsx`
+- **Landing page** is a single `pages/Landing.tsx` file, not split into `components/landing/` subcomponents

@@ -23,7 +23,7 @@ Businesses upload their documents (PDF, TXT, Markdown). Their teams or customers
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS v4, shadcn/ui |
+| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS v4, shadcn/ui |
 | Backend | FastAPI, Python 3.13, Pydantic |
 | Database | Supabase (PostgreSQL + pgvector + Auth + Storage) |
 | Embeddings | OpenAI text-embedding-3-small (1536 dimensions) |
@@ -57,7 +57,7 @@ cite/
 │   │   ├── main.py        App entry, CORS, middleware
 │   │   ├── config.py      Environment variable loading
 │   │   ├── dependencies.py Auth middleware, error handling
-│   │   ├── routers/       health, knowledge_bases, documents, chat, widget
+│   │   ├── routers/       health, knowledge_bases, documents, chat
 │   │   ├── services/      AI chunking, embedding, extraction, RAG + overview detection, Claude + SOURCES parsing
 │   │   └── models/        Pydantic request/response schemas
 │   ├── tests/
@@ -73,7 +73,7 @@ cite/
 ### Prerequisites
 
 - **Node.js** >= 20
-- **Python** >= 3.11
+- **Python** >= 3.13
 - **Supabase** project (free tier works) with pgvector extension enabled
 - **OpenAI** API key (for embeddings)
 - **Anthropic** API key (for chat)
@@ -189,8 +189,8 @@ POST   /api/v1/knowledge-bases/{kb_id}/chat             Send message (SSE stream
 GET    /api/v1/knowledge-bases/{kb_id}/conversations     List conversations
 GET    /api/v1/conversations/{conv_id}/messages          Get messages
 
-# Widget (public)
-POST   /api/v1/widget/{kb_id}/chat                      Public chat (rate-limited)
+# Widget (Phase 6 — not yet implemented)
+# POST   /api/v1/widget/{kb_id}/chat                    Public chat (rate-limited)
 ```
 
 ## How RAG Works
@@ -245,7 +245,7 @@ docker run -p 8000:8000 --env-file .env cite-backend
 | 2 | Complete | Knowledge Base CRUD |
 | 3 | Complete | Document Upload + AI-Powered Smart Chunking |
 | 4 | Complete | RAG Chat — Intelligent Document Assistant |
-| 5 | Not started | Landing Page + Polish + Deploy |
+| 5 | Complete | Landing Page + Deploy (Vercel + Railway) |
 | 6 | Not started | Embeddable Widget |
 | 7 | Not started | Final Polish |
 
