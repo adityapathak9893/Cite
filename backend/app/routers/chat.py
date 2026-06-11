@@ -33,7 +33,7 @@ def _verify_kb_ownership(
     """Verify the user owns the KB. Returns the KB row."""
     result = (
         supabase.table("knowledge_bases")
-        .select("id, name")
+        .select("id, name, chat_mode, domain_profile")
         .eq("id", kb_id)
         .eq("user_id", user_id)
         .execute()
@@ -62,6 +62,8 @@ async def chat(
         # Verify KB ownership and get name
         kb = _verify_kb_ownership(supabase, kb_id, user_id, request_id)
         kb_name = kb["name"]
+        chat_mode = kb.get("chat_mode") or "strict"
+        domain_profile = kb.get("domain_profile")
 
         # Check if KB has ready documents
         doc_count_result = (
@@ -157,6 +159,15 @@ async def chat(
             is_overview=overview,
         )
 
+        # Research mode: zero retrieval still goes to Claude — the contract's
+        # postures C/D/E handle conversational, off-topic, and frustrated messages
+        if chat_mode == "research" and not context:
+            context = (
+                "--- Document Knowledge ---\n"
+                "No document content was retrieved for this message.\n"
+                "--- End Document Knowledge ---"
+            )
+
         # Get last 6 messages for context (current user msg + 5 prior)
         history_result = (
             supabase.table("messages")
@@ -180,8 +191,9 @@ async def chat(
         # Build SSE generator
         async def event_generator():
             try:
-                # For non-overview questions with zero chunks, use canned response
-                if not overview and not chunks:
+                # Strict mode: non-overview questions with zero chunks get a canned
+                # response. In research mode this path goes to Claude instead.
+                if chat_mode != "research" and not overview and not chunks:
                     canned = (
                         "I wasn't able to find any relevant sections in the documents "
                         "for your question. Could you try rephrasing, or ask about a "
@@ -207,13 +219,23 @@ async def chat(
                 # Stream Claude's response
                 full_response = ""
                 sources: list[dict] = []
+                domain_context: str | None = None
 
-                async for event in stream_chat_response(kb_name, messages_for_claude, chunks, context):
+                async for event in stream_chat_response(
+                    kb_name,
+                    messages_for_claude,
+                    chunks,
+                    context,
+                    chat_mode=chat_mode,
+                    domain_profile=domain_profile,
+                ):
                     if event["done"]:
                         sources = event.get("sources", [])
+                        domain_context = event.get("domain_context")
                         full_response = event.get("full_response", "")
 
-                        # Save clean text (SOURCES block already stripped) + parsed sources
+                        # Save clean text (SOURCES + DOMAIN_CONTEXT blocks already
+                        # stripped) + parsed sources + domain context
                         msg_result = (
                             supabase.table("messages")
                             .insert({
@@ -221,12 +243,13 @@ async def chat(
                                 "role": "assistant",
                                 "content": full_response,
                                 "sources": sources,
+                                "domain_context": domain_context,
                             })
                             .execute()
                         )
                         message_id = msg_result.data[0]["id"]
 
-                        yield f"data: {json.dumps({'token': '', 'done': True, 'sources': sources, 'message_id': message_id, 'conversation_id': conversation_id})}\n\n"
+                        yield f"data: {json.dumps({'token': '', 'done': True, 'sources': sources, 'domain_context': domain_context, 'message_id': message_id, 'conversation_id': conversation_id})}\n\n"
                     else:
                         yield f"data: {json.dumps({'token': event['token'], 'done': False})}\n\n"
 
@@ -239,6 +262,7 @@ async def chat(
                     "token": "",
                     "done": True,
                     "sources": [],
+                    "domain_context": None,
                     "error": "Something went wrong while generating the response.",
                     "conversation_id": conversation_id,
                 }
@@ -357,6 +381,7 @@ async def get_messages(
                 role=row["role"],
                 content=row["content"],
                 sources=[SourceItem(**s) for s in (row.get("sources") or [])],
+                domain_context=row.get("domain_context"),
                 created_at=row["created_at"],
             )
             for row in (result.data or [])

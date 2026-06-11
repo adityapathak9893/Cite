@@ -88,6 +88,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     sources: list[SourceItem]
+    domain_context: str | None = None
     created_at: datetime
 
 
