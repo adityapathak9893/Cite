@@ -5,11 +5,9 @@ from functools import lru_cache
 
 import anthropic
 
-from app.config import get_settings
+from app.config import CLAUDE_MODEL, get_settings
 
 logger = logging.getLogger(__name__)
-
-CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 
 
 @lru_cache(maxsize=1)

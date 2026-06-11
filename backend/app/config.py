@@ -3,6 +3,9 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+# Single source of truth for the Claude model used by all services
+CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
+
 
 class Settings(BaseSettings):
     supabase_url: str

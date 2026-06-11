@@ -5,12 +5,10 @@ from collections.abc import AsyncGenerator
 
 import anthropic
 
-from app.config import get_settings
+from app.config import CLAUDE_MODEL, get_settings
 from app.services.claude import _get_client
 
 logger = logging.getLogger(__name__)
-
-CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 
 # Limits for AI section detection
 AI_CHAR_LIMIT = 30_000  # Only send first 30k chars to Claude for section detection

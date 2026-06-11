@@ -11,6 +11,7 @@ from app.models.schemas import DocumentResponse
 from app.services.chunking import chunk_document
 from app.services.embedding import embed_texts
 from app.services.extraction import extract_text
+from app.services.kb_profile import regenerate_kb_profile, regenerate_kb_profile_task
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +344,7 @@ async def get_document(
 async def delete_document(
     kb_id: str,
     doc_id: str,
+    background_tasks: BackgroundTasks,
     user: dict[str, str] = Depends(get_current_user),
     supabase: Client = Depends(get_supabase),
 ) -> None:
@@ -386,6 +388,15 @@ async def delete_document(
         logger.info(
             "Deleted document | doc_id=%s | kb_id=%s | user_id=%s | request_id=%s",
             doc_id, kb_id, user_id, request_id,
+        )
+
+        # Regenerate KB-level domain profile + suggested questions in background
+        settings = get_settings()
+        background_tasks.add_task(
+            regenerate_kb_profile_task,
+            kb_id=kb_id,
+            supabase_url=settings.supabase_url,
+            supabase_key=settings.supabase_service_key,
         )
 
     except AppException:
@@ -504,6 +515,11 @@ async def process_document(
             "Document processed | doc_id=%s | chunks=%d | duration=%.1fs",
             doc_id, len(chunks), duration,
         )
+
+        # 6. Regenerate KB-level domain profile + suggested questions
+        # (never raises — a failure keeps previous values and the upload stays "ready")
+        logger.info("Processing document | doc_id=%s | step=kb_profile", doc_id)
+        await regenerate_kb_profile(supabase, kb_id)
 
     except Exception as exc:
         duration = time.time() - start_time
