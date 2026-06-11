@@ -22,20 +22,22 @@ You are a document structure analyzer. Your job is to identify the logical secti
 Rules:
 - Identify every distinct section, subsection, and topic boundary
 - A "section" is a self-contained unit about ONE topic (a policy, a procedure, a definition, etc.)
-- Return the EXACT start and end character positions for each section
-- Each section should be between 200-3000 characters. If a section is longer than 3000 characters, split it into logical sub-sections
-- If a section is shorter than 200 characters, merge it with the adjacent section that is most topically related
-- Preserve complete paragraphs — never split mid-paragraph
-- Include a short title (max 10 words) describing what each section is about
+- List sections in the exact order they appear in the document
+- For each section, return a short title (max 10 words) and a start_marker
+- start_marker is the EXACT first 8-12 words of that section, copied character-for-character from the document text
+- start_markers must be VERBATIM QUOTES, not paraphrases. Do not reword, fix typos, change casing or punctuation, or normalize whitespace within the quoted words — the marker will be located in the original text with an exact string search
+- The first section's start_marker should be the very first words of the document
+- Each section should cover roughly 200-3000 characters of the document. If a topic runs longer than 3000 characters, start a new section at a logical point within it; if a topic is shorter than 200 characters, fold it into the adjacent section that is most topically related
+- Sections should start at paragraph or sentence boundaries — never mid-sentence
 
 Respond with ONLY a JSON array, no other text:
 [
-  {"title": "Section title here", "start": 0, "end": 1523},
-  {"title": "Next section title", "start": 1524, "end": 3201},
+  {"title": "Section title here", "start_marker": "exact first words of the section copied verbatim from the text"},
+  {"title": "Next section title", "start_marker": "exact first words of the next section copied verbatim"},
   ...
 ]
 
-The character positions must be exact — they will be used to slice the original text. The end of one section should be the start of the next (no gaps, no overlaps)."""
+Do NOT return character positions or offsets of any kind — only verbatim start_marker quotes."""
 
 SUMMARY_PROMPT_TEMPLATE = """\
 Below are the sections found in a document. Write a comprehensive 150-200 word summary of what this document covers. List ALL the main topics. This summary will be used to answer questions like "What is this document about?" and "What topics are covered?"
@@ -53,15 +55,180 @@ Respond with ONLY a JSON array of descriptions in the same order:
 ["description 1", "description 2", ...]"""
 
 
+# ─── Deterministic markdown splitting ───
+
+MARKDOWN_HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
+MARKDOWN_MIN_HEADINGS = 3
+
+
+def _has_markdown_structure(text: str) -> bool:
+    """True when the document has enough ## headings to split deterministically."""
+    return len(MARKDOWN_HEADING_RE.findall(text)) >= MARKDOWN_MIN_HEADINGS
+
+
+def _split_markdown_sections(text: str) -> list[dict]:
+    """Split a markdown document at ## heading lines — no AI involved.
+
+    Each section runs from its heading line to the character before the next
+    heading; content before the first heading becomes a preamble section.
+    Returns the same shape as AI detection: [{"title", "start", "end"}, ...]
+    """
+    heading_starts = [m.start() for m in MARKDOWN_HEADING_RE.finditer(text)]
+    if not heading_starts:
+        return []
+
+    sections: list[dict] = []
+
+    if heading_starts[0] > 0 and text[:heading_starts[0]].strip():
+        sections.append({"title": "Preamble", "start": 0, "end": heading_starts[0]})
+
+    for i, start in enumerate(heading_starts):
+        end = heading_starts[i + 1] if i + 1 < len(heading_starts) else len(text)
+        heading_line = text[start:end].split("\n", 1)[0]
+        title = heading_line.lstrip("#").strip()[:80] or f"Section {i + 1}"
+        sections.append({"title": title, "start": start, "end": end})
+
+    sections = _merge_undersized_sections(sections)
+    return _split_oversized_sections(sections, text)
+
+
+def _merge_undersized_sections(sections: list[dict]) -> list[dict]:
+    """Merge sections shorter than SECTION_MIN into their neighbor."""
+    merged: list[dict] = []
+    for section in sections:
+        if merged and section["end"] - section["start"] < SECTION_MIN:
+            merged[-1]["end"] = section["end"]
+        else:
+            merged.append(dict(section))
+
+    # An undersized first section has no previous neighbor — fold it into the next
+    if len(merged) > 1 and merged[0]["end"] - merged[0]["start"] < SECTION_MIN:
+        merged[1] = {
+            "title": merged[1]["title"],
+            "start": merged[0]["start"],
+            "end": merged[1]["end"],
+        }
+        merged = merged[1:]
+
+    return merged
+
+
+def _split_oversized_sections(sections: list[dict], text: str) -> list[dict]:
+    """Split sections longer than SECTION_MAX at paragraph breaks (\\n\\n)."""
+    result: list[dict] = []
+    for section in sections:
+        if section["end"] - section["start"] <= SECTION_MAX:
+            result.append(section)
+            continue
+        spans = _paragraph_spans(text, section["start"], section["end"])
+        for j, (start, end) in enumerate(spans):
+            title = section["title"] if j == 0 else f"{section['title']} (part {j + 1})"
+            result.append({"title": title, "start": start, "end": end})
+    return result
+
+
+def _paragraph_spans(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    """Cut [start, end) into spans of at most SECTION_MAX chars at \\n\\n breaks.
+
+    Cuts only ever land on a paragraph break — a span with no break in range
+    is left whole (slightly oversized) rather than severed mid-word.
+    """
+    spans: list[tuple[int, int]] = []
+    cursor = start
+    while end - cursor > SECTION_MAX:
+        cut = text.rfind("\n\n", cursor + SECTION_MIN, cursor + SECTION_MAX)
+        if cut == -1:
+            cut = text.find("\n\n", cursor + SECTION_MAX, end)
+        if cut == -1:
+            break
+        spans.append((cursor, cut))
+        cursor = cut
+    spans.append((cursor, end))
+    return spans
+
+
+# ─── Verbatim-marker boundary location ───
+
+
+def _locate_marker_boundaries(text: str, sections: list[dict]) -> list[dict] | None:
+    """Convert AI-returned verbatim start_markers into character boundaries.
+
+    Each marker is located with an exact sequential string search — search_from
+    advances past each located marker so duplicate text earlier in the document
+    can never produce a false match. A marker that cannot be found is skipped
+    (its span is absorbed by the previous section). Returns None when more than
+    a third of markers fail, signalling the caller to abandon AI sectioning.
+    """
+    located: list[dict] = []
+    failed = 0
+    search_from = 0
+
+    for i, section in enumerate(sections):
+        marker = str(section.get("start_marker") or "").strip()
+        title = section.get("title", f"Section {i + 1}")
+
+        if not marker:
+            failed += 1
+            logger.warning("Section %d (%s) has empty start_marker, skipping boundary", i + 1, title)
+            continue
+
+        position = text.find(marker, search_from)
+        if position == -1:
+            failed += 1
+            logger.warning(
+                "Start marker not found in text, absorbing span into previous section: %r",
+                marker[:120],
+            )
+            continue
+
+        located.append({"title": title, "start": position})
+        search_from = position + len(marker)
+
+    if failed * 3 > len(sections):
+        logger.warning(
+            "%d of %d section markers failed to locate — abandoning AI sectioning, "
+            "using fixed-size fallback chunking",
+            failed, len(sections),
+        )
+        return None
+
+    if not located:
+        return None
+
+    # First section absorbs any text before its marker (covers the whole document)
+    located[0]["start"] = 0
+
+    boundaries: list[dict] = []
+    for i, item in enumerate(located):
+        end = located[i + 1]["start"] if i + 1 < len(located) else len(text)
+        boundaries.append({"title": item["title"], "start": item["start"], "end": end})
+
+    return boundaries
+
+
 # ─── AI-powered section detection ───
 
 
 async def identify_sections(text: str) -> list[dict]:
-    """Use Claude to identify logical section boundaries in the document.
+    """Identify logical section boundaries in the document.
+
+    Documents with markdown structure (3+ ## headings) are split
+    deterministically with no AI call. Otherwise Claude returns verbatim
+    start markers (never character positions — LLMs cannot count characters)
+    which are located in the text by exact string search.
 
     Returns list of dicts: [{"title": "...", "start": int, "end": int}, ...]
-    Falls back to heuristic chunking on failure.
+    Returns [] on failure so the caller falls back to fixed-size chunking.
     """
+    if _has_markdown_structure(text):
+        sections = _split_markdown_sections(text)
+        if sections:
+            logger.info(
+                "Markdown structure detected, split into %d sections deterministically (no AI call)",
+                len(sections),
+            )
+            return sections
+
     client = _get_client()
 
     # For large documents, only send first AI_CHAR_LIMIT chars to Claude
@@ -82,21 +249,27 @@ async def identify_sections(text: str) -> list[dict]:
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
 
-        sections = json.loads(raw)
+        ai_sections = json.loads(raw)
 
-        if not isinstance(sections, list) or len(sections) == 0:
+        if not isinstance(ai_sections, list) or len(ai_sections) == 0:
             logger.warning("AI returned empty/invalid sections, falling back")
             return []
 
         # Validate structure
-        for s in sections:
-            if not isinstance(s, dict) or "start" not in s or "end" not in s:
+        for s in ai_sections:
+            if not isinstance(s, dict):
                 logger.warning("AI returned malformed section: %s", s)
                 return []
 
+        # Markers are located within ai_text so boundaries never cross the
+        # AI_CHAR_LIMIT cutoff — the remainder is handled heuristically below
+        sections = _locate_marker_boundaries(ai_text, ai_sections)
+        if sections is None:
+            return []
+
         logger.info(
-            "AI identified %d sections in first %d chars",
-            len(sections), len(ai_text),
+            "AI identified %d sections (%d boundaries located) in first %d chars",
+            len(ai_sections), len(sections), len(ai_text),
         )
 
         # If document is longer than what we sent to Claude, handle the remainder
