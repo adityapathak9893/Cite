@@ -246,8 +246,8 @@ docker run -p 8000:8000 --env-file .env cite-backend
 | 3 | Complete | Document Upload + AI-Powered Smart Chunking |
 | 4 | Complete | RAG Chat — Intelligent Document Assistant |
 | 5 | Complete | Landing Page + Deploy (Vercel + Railway) |
-| 6 | Not started | Embeddable Widget |
-| 7 | Not started | Final Polish |
+| 6 | Complete | Embeddable Widget |
+| 7 | Complete | Final Polish |
 
 ## License
 
