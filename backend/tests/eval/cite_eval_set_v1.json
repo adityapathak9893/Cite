@@ -182,9 +182,9 @@
       "id": "frust-02",
       "question": "I've been trying to get this scan to run for an hour and I'm losing my mind.",
       "expected_posture": "E",
-      "should_have_sources": true,
+      "should_have_sources": false,
       "should_have_domain_block": false,
-      "notes": "Frustration + identifiable problem. Acknowledge briefly, then help from Section 20 (scan stuck at queued -> Agent scope). Sources allowed because doc content is used."
+      "notes": "Asking a clarifying question before citing docs is valid posture E; sources only expected if the model chooses to answer directly."
     },
     {
       "id": "offtopic-01",
