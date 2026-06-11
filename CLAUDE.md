@@ -1,12 +1,11 @@
 # CLAUDE.md — Weaverbit Cite
 
-IN PROGRESS — Research Mode. 
-This file describes the pre-research-mode system. Implementation follows cite_research_mode_brief.md, which overrides this document wherever they conflict. CLAUDE.md will be synced in Phase F.
-
 ## Project Overview
 
-**Product:** Weaverbit Cite — an AI-powered document Q&A platform with embeddable chat widget.
-**What it does:** Businesses upload their documents. Their teams (or customers) chat with an AI that answers ONLY from those documents, with source citations.
+**Product:** Weaverbit Cite — an AI-powered document Q&A platform (embeddable chat widget planned, Phase 6).
+**What it does:** Businesses upload their documents. Their teams (or customers) chat with an AI about them in one of two per-KB chat modes, with source citations:
+- **strict** — answers come ONLY from the documents; zero retrieval gets a canned fallback message.
+- **research** — document-anchored: the main answer is grounded ONLY in the documents, and domain knowledge beyond them appears in a clearly labeled, visually fenced "Domain context" block. Governed by a behavioral contract (see Prompt Assembly).
 **Domain:** cite.weaverbit.com
 **Owner:** Aditya (Weaverbit LLC)
 
@@ -81,9 +80,10 @@ cite/
 │       │       ├── ChatWindow.tsx      (main chat container + conversation selector)
 │       │       ├── MessageBubble.tsx   (user vs assistant styling + Markdown rendering)
 │       │       ├── SourceCitation.tsx  (clickable source references)
+│       │       ├── DomainContextPanel.tsx (fenced research-mode domain knowledge panel)
 │       │       ├── ChatInput.tsx       (auto-height textarea + send button)
 │       │       ├── StreamingIndicator.tsx (3-dot pulsing animation)
-│       │       └── SuggestionChips.tsx (contextual suggestions on empty chat)
+│       │       └── SuggestionChips.tsx (KB suggested_questions, hardcoded fallback on null)
 │       ├── pages/
 │       │   ├── Landing.tsx            (full marketing page — hero, features, how-it-works, CTA, footer)
 │       │   ├── Login.tsx
@@ -114,17 +114,25 @@ cite/
 │   │   │   └── chat.py        (RAG query + streaming response + conversations)
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   ├── chunking.py    (AI-powered intelligent document chunking)
+│   │   │   ├── chunking.py    (markdown-first + verbatim-marker document chunking)
 │   │   │   ├── embedding.py   (OpenAI embedding API calls via httpx)
 │   │   │   ├── extraction.py  (PDF/TXT/MD text extraction)
 │   │   │   ├── rag.py         (vector search + overview detection + context assembly)
-│   │   │   └── claude.py      (Claude API streaming + SOURCES parsing)
+│   │   │   ├── kb_profile.py  (KB domain profile + suggested questions generation)
+│   │   │   └── claude.py      (Claude API streaming + mode-conditional prompts + SOURCES/DOMAIN_CONTEXT parsing)
 │   │   └── models/
 │   │       ├── __init__.py
 │   │       └── schemas.py     (Pydantic request/response models)
+│   ├── migrations/
+│   │   └── 001_research_mode.sql  (domain_profile, suggested_questions, chat_mode, domain_context)
 │   └── tests/
 │       ├── __init__.py
-│       └── test_health.py
+│       ├── test_health.py
+│       ├── test_research_mode.py  (DOMAIN_CONTEXT parser + prompt builder unit tests)
+│       ├── test_chunking.py       (markdown splitting + marker location unit tests)
+│       └── eval/
+│           ├── run_eval.py            (eval runner — not pytest-collected)
+│           └── cite_eval_set_v1.json  (25-case eval set)
 │
 │── (PLANNED — Not yet created) ──
 │
@@ -148,12 +156,18 @@ cite/
 create extension if not exists vector;
 
 -- Knowledge bases
+-- (domain_profile, suggested_questions, chat_mode were added by
+--  backend/migrations/001_research_mode.sql; included here for fresh setups)
 create table knowledge_bases (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users(id) on delete cascade not null,
   name text not null,
   description text,
   is_public boolean default false,
+  domain_profile text,                -- AI-generated 2-4 sentence corpus domain description
+  suggested_questions jsonb,          -- AI-generated array of corpus-specific question strings
+  chat_mode text not null default 'research'
+    check (chat_mode in ('strict', 'research')),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -223,12 +237,14 @@ create policy "Public conversations via share token"
   using (is_widget = true);
 
 -- Messages
+-- (domain_context was added by backend/migrations/001_research_mode.sql)
 create table messages (
   id uuid default gen_random_uuid() primary key,
   conversation_id uuid references conversations(id) on delete cascade not null,
   role text not null check (role in ('user', 'assistant')),
   content text not null,
   sources jsonb default '[]'::jsonb,
+  domain_context text,                -- research mode: parsed DOMAIN_CONTEXT block (null otherwise)
   created_at timestamptz default now()
 );
 
@@ -317,32 +333,75 @@ GET    /api/v1/conversations/{conv_id}/messages             → Get messages in 
 
 ## RAG Pipeline Details
 
-### Chunking Strategy (AI-Powered)
+### Chunking Strategy
 
 ```
-3-step intelligent chunking pipeline using Claude during document processing:
+3-step chunking pipeline during document processing (chunking.py).
+Root principle: never ask an LLM for character positions (LLMs cannot count
+characters — position-based chunking caused mid-word seams in production);
+ask it for verbatim text that code can locate.
 
-Step 1 — AI Section Detection (identify_sections):
-- Sends document text to Claude to identify logical section boundaries
-- Each section: title + start/end character positions (200-3000 chars each)
-- For docs > 30,000 chars: AI analyzes first 30k, heuristic splits the rest
-  (splits at double-newlines and heading patterns to keep API costs low)
-- Falls back to fixed-size chunking (2000 chars, 200 overlap) if AI fails
+Step 1 — Section Detection (identify_sections):
 
-Step 2 — Document Summary (generate_summary):
+  Markdown documents (deterministic, runs first — NO AI boundary call):
+  - If the text contains 3+ lines matching ^##\s, sections are split in code
+    at those heading lines. Each section = its heading line through the
+    character before the next heading; content before the first heading
+    becomes a "Preamble" section. Section titles come from the heading text.
+  - 200-3000 char size constraints: undersized sections merge into their
+    neighbor; oversized sections split at paragraph breaks (\n\n) — cuts
+    only ever land on a paragraph break, never mid-word.
+
+  Unstructured documents (AI section detection with verbatim start-markers):
+  - Claude returns, per section, a title + start_marker: the exact verbatim
+    first 8-12 words of the section, copied character-for-character. The
+    model is NEVER asked for character positions.
+  - Python locates each boundary with text.find(start_marker, search_from),
+    where search_from advances past each located marker — sequential search
+    prevents duplicate-text false matches. Each section runs from its marker
+    to the next located marker; the last runs to end of text (or the 30k cutoff).
+  - Marker failure handling: unfound marker → warning logged with the marker
+    text, boundary skipped, span absorbed by the previous section. More than
+    one-third of markers failing → AI sectioning abandoned for the document,
+    fixed-size fallback chunker used (with a log entry).
+  - For docs > 30,000 chars: section detection covers the first 30k, heuristic
+    splits the rest (double-newlines and heading patterns, keeps API costs low)
+  - Falls back to fixed-size chunking (2000 chars, 200 overlap) if AI fails
+
+Step 2 — Document Summary (generate_summary) — unchanged:
 - Claude generates a 150-200 word overview from section titles + previews
 - Stored as chunk_index 0 with metadata: {"is_summary": true, "title": "Document Overview"}
 - Answers meta-questions like "What is this document about?"
 - Fallback: concatenates section titles
 
-Step 3 — Search Descriptions (generate_chunk_descriptions):
+Step 3 — Search Descriptions (generate_chunk_descriptions) — unchanged:
 - Single Claude call generates keyword-rich one-line descriptions per section
 - Stored in metadata: {"search_description": "anti-bribery FCPA corruption gift policy"}
 - Used to improve embedding quality (see Embedding section below)
 - Fallback: uses section titles
 
+Steps 2-3 run identically on code-derived (markdown) and AI-derived sections.
+
 Each chunk stores:
   content, chunk_index, metadata {title, is_summary, search_description, file_name}
+```
+
+### KB Domain Profile + Suggested Questions (kb_profile.py)
+
+```
+After every successful document processing AND on document deletion,
+regenerate_kb_profile runs (background task, mirrors process_document):
+- One Claude call receives the chunk-0 summaries of ALL documents in the KB
+- Returns JSON: {"domain_profile": "2-4 sentences on what the corpus concerns,
+  its field, adjacent in-domain topics", "suggested_questions": [4-6 strings]}
+- Suggested questions must be corpus-specific (reference real names/terms/metrics
+  from the summaries) — never generic templates like "Summarize the key points"
+- Both fields stored on the knowledge_bases row
+- Deleting the last document clears both fields (don't describe an empty KB)
+- Failure handling mirrors the AI-chunking fallback philosophy: log a warning,
+  keep previous values, never fail the upload
+- domain_profile feeds the research-mode prompt; suggested_questions feed the
+  frontend suggestion chips
 ```
 
 ### Embedding
@@ -386,24 +445,53 @@ Context Assembly (rag.py — build_context):
 - For SPECIFIC questions: Document Knowledge only
 - Each chunk labeled: [Section {chunk_index}] {filename} — "{title}"
 
-No-Chunks Handling:
+No-Chunks Handling (zero retrieval — mode-dependent):
 - Overview questions ALWAYS go to Claude (even with 0 vector results) because
   they have document structure context
-- Specific questions with 0 vector results get a friendly canned response
+- STRICT mode: specific questions with 0 vector results get the fixed canned
+  fallback message ("I wasn't able to find any relevant sections...") WITHOUT
+  calling Claude
+- RESEARCH mode: zero-retrieval messages always go to Claude with the behavioral
+  contract, conversation history, and a context block stating "No document content
+  was retrieved for this message." The contract's postures C/D/E handle
+  conversational, off-topic, and frustrated messages; its zero-retrieval Hard Rule
+  requires the main answer to be at most two sentences, with all substance in the
+  domain block. The canned string must never appear in research mode
 ```
 
 ### Prompt Assembly
 
 ```
-System prompt (claude.py — build_system_prompt):
-- Conversational expert persona: "You have thoroughly read and understood all the
-  documents in this knowledge base. You are a knowledgeable, helpful expert."
+System prompt (claude.py — build_system_prompt) is MODE-CONDITIONAL on
+knowledge_bases.chat_mode:
+
+STRICT mode — original conversational expert persona, byte-for-byte unchanged:
+- "You have thoroughly read and understood all the documents in this knowledge
+  base. You are a knowledgeable, helpful expert."
 - Instructs Claude to synthesize, explain, and educate — not just quote text
 - For overview questions: cover all major topics comprehensively
 - For specific questions: give thorough answers with context and implications
 - No inline citations: Claude must NOT use [Source: ...] in the response text
 - Graceful no-answer: "The documents don't appear to cover that topic..." instead
   of robotic "I don't have enough information in the uploaded documents"
+
+RESEARCH mode — the Behavioral Contract (claude.py — RESEARCH_CONTRACT_TEMPLATE):
+- Five postures: A document questions / B domain questions / C conversational
+  moments / D off-topic substance / E frustration and complaints
+- Boundary rules: anchor (history never makes off-topic on-topic), tiebreak
+  (B-vs-D ambiguity → brief B), competitor (never evaluate competing products),
+  no-man's-land (no retrieval + no domain relevance + not conversational = D)
+- Output format: main answer (grounded ONLY in retrieved content) → optional
+  ---DOMAIN_CONTEXT--- block → optional ---SOURCES--- block; postures C/D/E
+  produce NO blocks
+- Hard Rules, including the zero-retrieval rule: when no document content was
+  retrieved, the main answer is at most two sentences — everything else goes
+  in the domain block or is omitted
+- Interpolates {kb_name}, {domain_profile} (DOMAIN_PROFILE_FALLBACK when the KB
+  has no profile yet), and {tone} (hardcoded RESEARCH_TONE)
+- The full contract text lives in backend/app/services/claude.py
+  (RESEARCH_CONTRACT_TEMPLATE); its source spec is cite_research_mode_brief.md
+  Appendix 1. Do NOT paraphrase or duplicate it here
 
 Source Attribution (end-of-response SOURCES block):
 - Claude outputs a machine-parseable block at the end of every response:
@@ -415,6 +503,20 @@ Source Attribution (end-of-response SOURCES block):
 - Parsed sources are matched against original chunks for document_id, similarity
 - Clean text (SOURCES block stripped) is saved to the messages table
 - Frontend strips SOURCES block during streaming and from saved messages
+
+Domain Context (research-mode DOMAIN_CONTEXT block):
+- Research-mode output order: main answer → optional ---DOMAIN_CONTEXT--- ...
+  ---END_DOMAIN_CONTEXT--- → optional ---SOURCES--- block (unchanged format)
+- Backend parses it (claude.py — parse_domain_context_from_response, mirrors the
+  SOURCES parser) AFTER stripping the SOURCES block; the block is stripped from
+  the saved message text and stored in messages.domain_context
+- Robustness: missing end delimiter → remainder treated as the block + warning;
+  block emitted in strict mode → stripped and discarded with a warning;
+  empty block → treated as absent
+- Delivered to the client in the final SSE event alongside sources
+- Frontend renders it (DomainContextPanel — "Domain context — beyond your
+  documents") as a visually fenced panel below the main answer and above the
+  citation chips, after streaming completes
 
 Context (injected after system prompt):
 "Knowledge base: {kb_name}
@@ -450,11 +552,14 @@ User message:
 - FastAPI StreamingResponse with text/event-stream content type
 - Frontend uses fetch with ReadableStream
 - Each streamed chunk is sent as SSE: data: {"token": "...", "done": false}
-- Claude's response includes ---SOURCES--- block at the end (streamed as normal tokens)
-- Backend parses SOURCES block after stream completes, returns clean text + parsed sources
-- Final SSE event: data: {"token": "", "done": true, "sources": [...], "full_response": "..."}
-  (full_response is clean text with SOURCES block stripped — this is what gets saved to DB)
-- Frontend strips SOURCES block from display during streaming (handles partial markers)
+- Claude's response includes the optional ---DOMAIN_CONTEXT--- block (research mode)
+  followed by the ---SOURCES--- block at the end (both streamed as normal tokens)
+- Backend parses both blocks after stream completes, returns clean text + parsed
+  sources + domain_context
+- Final SSE event: data: {"token": "", "done": true, "sources": [...],
+  "domain_context": "..." | null, "full_response": "..."}
+  (full_response is clean text with BOTH blocks stripped — this is what gets saved to DB)
+- Frontend strips both blocks from display during streaming (handles partial markers)
 - Frontend also strips SOURCES block from cached content before adding to query cache
 - Citation chips rendered from parsed sources (not from raw chunks) — only shows what Claude cited
 ```
@@ -677,6 +782,44 @@ secrets.txt
 - Backend: CORS headers are set correctly for allowed origins
 - Backend: Protected endpoints return 401 without auth, not 500
 - Backend: Error responses match the standard format defined above
+- Backend: DOMAIN_CONTEXT parser — present / absent / missing end delimiter /
+  strict-mode discard (tests/test_research_mode.py)
+- Backend: prompt builder — mode switching, null-profile fallback, strict prompt
+  unchanged (tests/test_research_mode.py)
+- Backend: chunking — markdown splitting at headings, 200/3000 merge/split
+  constraints, sequential marker location with duplicate text, unfindable-marker
+  absorption, >1/3-failure fallback (tests/test_chunking.py)
+
+### Eval harness (backend/tests/eval/)
+- `run_eval.py` — a script, NOT pytest-collected. Loads the 25-case
+  `cite_eval_set_v1.json`, authenticates with env-provided credentials, sends each
+  case's question to the chat endpoint of an env-provided research-mode KB (fresh
+  conversation per case; the drift case sends its messages sequentially in ONE
+  conversation), and captures full responses
+- Automated structural checks per case:
+  - sources presence/absence matches `should_have_sources`
+  - domain-block presence/absence matches `should_have_domain_block`
+  - the canned zero-retrieval fallback string never appears
+  - human-posture length (expected posture C/D/E → response under ~600 chars)
+  - competitor rule (bait-05: no evaluative content near a competitor mention;
+    any mention flags manual review)
+  - drift final turn must be posture D — no sources, no domain block
+  - zero-source brevity (posture B: zero-source main answer under ~350 chars)
+  - zero-source non-attribution (no "the documents show/state/describe" in any
+    zero-source turn)
+- Writes timestamped reports: `eval_results_<timestamp>.json` (machine-readable)
+  + `eval_report_<timestamp>.md` (human-readable)
+- Posture *quality* is graded manually from the markdown report;
+  `judge_posture_quality()` is a clearly marked LLM-as-judge stub
+
+### Known Limitations
+- Zero-retrieval questions with high intrinsic interest may produce an overlong
+  main answer; the Hard Rule reduces but does not eliminate this (observed in
+  eval case bait-07 across multiple runs).
+- No false attribution to documents has been observed across 4 eval runs.
+- Vector-only retrieval can miss keyword-exact sections (eval case grounded-02:
+  "schedule" query failed to retrieve the Scan Scheduling section three times) —
+  hybrid search is the planned remediation.
 
 ### What NOT to spend time on now
 - Unit tests for every utility function — only test critical paths
@@ -837,12 +980,18 @@ DEBUG:   Full request/response bodies, SQL queries, embedding vectors —
 - Upload endpoint: receives file, stores in Supabase Storage, creates document record with status "uploading"
 - Processing pipeline (triggered after upload):
   1. Extract text (PyPDF2 for PDF, plain read for .txt/.md)
-  2. AI-powered chunking: Claude identifies sections → generates summary → generates search descriptions
-     (falls back to fixed-size 2000-char chunks if AI fails)
+  2. Smart chunking: markdown docs (3+ ## headings) split deterministically in code;
+     unstructured docs use AI section detection via verbatim start-markers →
+     generate summary → generate search descriptions
+     (falls back to fixed-size 2000-char chunks if AI sectioning fails)
   3. Generate embeddings via OpenAI API (combined search_description + content for each chunk)
   4. Store chunks + embeddings in document_chunks table (content stores original text, not combined)
   5. Update document status to "ready" (or "failed" with error_message)
-  - Note: 3 Claude API calls per document during processing (section detection, summary, descriptions)
+  6. Regenerate the KB domain profile + suggested questions (kb_profile.py) from all
+     documents' chunk-0 summaries; also triggered on document deletion. Failure is
+     logged and previous values kept — never fails the upload
+  - Note: up to 4 Claude API calls per document during processing (section detection —
+    skipped for markdown docs, summary, descriptions, KB profile)
 - Status endpoint: returns current document processing status
 - Delete endpoint: removes document, chunks, and storage file
 
@@ -901,6 +1050,23 @@ DEBUG:   Full request/response bodies, SQL queries, embedding vectors —
 - ✅ Frontend deployed to Vercel at cite.weaverbit.com
 - ✅ Backend deployed to Railway
 - ⬜ CI/CD via GitHub Actions (`.github/workflows/`) — not yet set up
+
+### Research Mode (Phases A–F) — COMPLETE (June 2026)
+
+Implemented per cite_research_mode_brief.md, eval-verified across four runs:
+
+- **A — Migration:** `backend/migrations/001_research_mode.sql` (domain_profile,
+  suggested_questions, chat_mode on knowledge_bases; domain_context on messages)
+- **B — KB profile generation:** `kb_profile.py` — domain profile + corpus-specific
+  suggested questions regenerated on every document processing/deletion
+- **C — Backend chat:** mode-conditional system prompt (strict unchanged; research
+  uses the behavioral contract), research-mode zero-retrieval path goes to Claude,
+  DOMAIN_CONTEXT parsing/storage/SSE delivery
+- **D — Frontend:** DomainContextPanel below answers, suggested-question chips from
+  the KB row, extended TypeScript types
+- **E — Eval harness:** `backend/tests/eval/run_eval.py` + 25-case set, plus parser
+  and prompt-builder unit tests
+- **F — Documentation sync:** this document and README.md updated to match reality
 
 ### Phase 6: Embeddable Widget (Day 11-13)
 
@@ -991,13 +1157,15 @@ docker run -p 8000:8000 --env-file .env cite-backend
 - The widget endpoint will be PUBLIC (Phase 6, pending) — implement rate limiting before deploy
 - Streaming responses use Server-Sent Events (SSE), not WebSockets
 - For PDF extraction, use PyPDF2 (simple, reliable) — not heavy libraries like pdfplumber
-- Document chunking uses AI (Claude) to identify logical sections — falls back to fixed-size if AI fails
+- Document chunking: markdown docs (3+ ## headings) are split deterministically in code at heading boundaries; unstructured docs use AI section detection that returns verbatim start-markers located via sequential text.find — the model is never asked for character positions. Falls back to fixed-size chunking if AI sectioning fails or >1/3 of markers can't be located
 - Embeddings are generated from combined text (search_description + content), but only original content is stored in document_chunks
 - Existing documents must be deleted and re-uploaded to benefit from new chunking — old chunks are not auto-migrated
 - The ivfflat index on embeddings requires at least ~100 rows to be effective. For small datasets during development, it still works but may not be as fast
 - All dates are stored and returned in UTC (timestamptz)
+- Chat is per-KB mode-conditional (knowledge_bases.chat_mode): 'strict' is the original document-only persona; 'research' (default for new KBs) uses the behavioral contract in claude.py — doc-grounded main answer plus an optional clearly-labeled domain-context block
 - Chat uses an intelligent assistant persona — Claude synthesizes and explains, not just quotes. No inline citations; sources appear as chips below the response
-- Claude outputs ---SOURCES--- block at end of response; backend parses it, strips it, saves clean text to DB. Frontend also strips it during streaming as a safety net
+- Claude outputs ---SOURCES--- block at end of response (research mode may precede it with a ---DOMAIN_CONTEXT--- block); backend parses both, strips both, saves clean text + domain_context to DB. Frontend also strips them during streaming as a safety net
+- KB domain profile + suggested questions (kb_profile.py) regenerate on every document processing/deletion; suggestion chips read knowledge_bases.suggested_questions and fall back to the hardcoded set when null
 - Overview questions ("what is this about?", "summarize", etc.) get document structure + summary context in addition to vector search results, so Claude can give comprehensive overviews
 - Citation chips show section title (from Claude's parsed sources) instead of content preview. Old messages without title fall back to content preview
 - Sources shown to the user are only the sections Claude actually cited, not all retrieved chunks

@@ -1,23 +1,29 @@
 # Weaverbit Cite
 
-AI-powered document Q&A platform with embeddable chat widget. Upload your documents, ask questions, and get answers with source citations — powered by RAG (Retrieval-Augmented Generation).
+AI-powered document Q&A platform. Upload your documents, ask questions, and get document-grounded answers with source citations — powered by RAG (Retrieval-Augmented Generation).
 
 **Live:** [cite.weaverbit.com](https://cite.weaverbit.com)
 
 ## What It Does
 
-Businesses upload their documents (PDF, TXT, Markdown). Their teams or customers chat with an AI that answers **only** from those documents, with clickable source citations. No hallucination — every answer is grounded in your uploaded content.
+Businesses upload their documents (PDF, TXT, Markdown). Their teams or customers chat with an AI about them, with clickable source citations. Each knowledge base runs in one of two chat modes:
+
+- **Strict** — answers come only from the uploaded documents; questions the documents don't cover get a fallback message.
+- **Research** — two-channel answers: the main answer stays grounded in the documents, while relevant domain knowledge beyond them appears in a separate, clearly labeled "Domain context" panel — never mixed into the document-grounded answer.
 
 ### Key Features
 
 - **Intelligent Document Assistant** — AI synthesizes and explains documents conversationally, not just quoting text. Answers feel like talking to a colleague who has deeply read every document
-- **AI-Powered Smart Chunking** — Claude identifies logical section boundaries during document processing, generates summaries and keyword descriptions for better retrieval
+- **Research Mode (two-channel answers)** — a behavioral contract separates what the documents say from what the field knows: document-grounded main answer, fenced domain-context panel for everything beyond. Per-KB switchable back to strict document-only mode
+- **Domain Profiles & Suggested Questions** — after each upload, the KB's domain is profiled and 4–6 corpus-specific suggested questions are generated (real terms from your documents, not generic templates) and shown as chips on empty chats
+- **Smart Chunking** — markdown documents are split deterministically at heading boundaries; unstructured documents use AI section detection via verbatim text markers (never character offsets), plus AI-generated summaries and keyword descriptions for better retrieval
 - **Source Citations** — Citation chips appear below responses showing exactly which sections were used, without interrupting the answer text
 - **Knowledge Bases** — Organize documents into separate collections with independent chat
 - **Streaming Responses** — Real-time token-by-token AI responses via Server-Sent Events
-- **Embeddable Widget** — Drop a `<script>` tag on any website to add document chat
 - **Dark Mode** — Full light/dark theme support with system preference detection
 - **Secure by Design** — All AI keys stay server-side; frontend only holds public Supabase anon key
+
+An embeddable website widget is planned (Phase 6) but not yet built.
 
 ## Tech Stack
 
@@ -58,9 +64,10 @@ cite/
 │   │   ├── config.py      Environment variable loading
 │   │   ├── dependencies.py Auth middleware, error handling
 │   │   ├── routers/       health, knowledge_bases, documents, chat
-│   │   ├── services/      AI chunking, embedding, extraction, RAG + overview detection, Claude + SOURCES parsing
+│   │   ├── services/      chunking, embedding, extraction, RAG + overview detection, KB profiles, Claude + block parsing
 │   │   └── models/        Pydantic request/response schemas
-│   ├── tests/
+│   ├── migrations/        SQL migrations (run in Supabase SQL Editor)
+│   ├── tests/             unit tests + eval harness (tests/eval/)
 │   ├── Dockerfile
 │   └── requirements.txt
 │
@@ -199,18 +206,19 @@ GET    /api/v1/conversations/{conv_id}/messages          Get messages
 
 1. **Upload** — User uploads a PDF/TXT/MD file
 2. **Extract** — Backend extracts text from the document
-3. **AI Chunking** — Claude identifies logical section boundaries (200-3000 chars each), generates a document summary (stored as chunk 0), and creates keyword-rich search descriptions per section. Falls back to fixed-size chunking if AI fails
+3. **Chunk** — Markdown documents (3+ `##` headings) are split deterministically at heading boundaries (200-3000 chars, merge/split constraints). Unstructured documents use AI section detection that returns verbatim start-markers (the exact first words of each section), located in code by sequential string search — the model is never asked for character positions. Claude then generates a document summary (stored as chunk 0) and keyword-rich search descriptions per section. Falls back to fixed-size chunking if AI sectioning fails
 4. **Embed** — Each chunk is embedded via OpenAI using combined text (search description + content) for better retrieval
 5. **Store** — Chunks + vectors + metadata (title, summary flag, search description) stored in Supabase pgvector
+6. **Profile** — The KB's domain profile and corpus-specific suggested questions are regenerated from all document summaries (also on document deletion)
 
 ### Chat (at query time)
 
-6. **Query** — User asks a question, which is embedded using the same model
-7. **Overview Detection** — Backend detects overview questions ("what is this about?", "summarize", etc.) and fetches document structure (summary + all section titles) in addition to vector search
-8. **Search** — pgvector finds up to 8 candidates with similarity > 0.5 (retries at 0.3 if zero results), returns top 5
-9. **Context Assembly** — Retrieved chunks framed as "Document Knowledge" (not "Excerpts") so Claude treats them as internalized knowledge. Overview questions also get document structure and summary
-10. **Generate** — Claude answers as an intelligent document expert: synthesizes across sections, explains concepts, uses formatting. Outputs a machine-parseable `---SOURCES---` block at the end listing cited sections
-11. **Parse & Stream** — Response streamed token-by-token via SSE. Backend parses SOURCES block after stream completes, strips it from saved text, and returns parsed sources as citation chips
+7. **Query** — User asks a question, which is embedded using the same model
+8. **Overview Detection** — Backend detects overview questions ("what is this about?", "summarize", etc.) and fetches document structure (summary + all section titles) in addition to vector search
+9. **Search** — pgvector finds up to 8 candidates with similarity > 0.5 (retries at 0.3 if zero results), returns top 5
+10. **Context Assembly** — Retrieved chunks framed as "Document Knowledge" (not "Excerpts") so Claude treats them as internalized knowledge. Overview questions also get document structure and summary
+11. **Generate** — Mode-conditional: strict mode uses the document-expert prompt; research mode uses a behavioral contract that classifies each message (document question, domain question, conversational, off-topic, frustration) and keeps domain knowledge out of the document-grounded main answer. In research mode, zero-retrieval messages still go to the model (strict mode returns a fallback message instead). Responses end with a machine-parseable `---SOURCES---` block, optionally preceded in research mode by a `---DOMAIN_CONTEXT---` block
+12. **Parse & Stream** — Response streamed token-by-token via SSE. Backend parses the SOURCES and DOMAIN_CONTEXT blocks after the stream completes, strips them from saved text, and returns parsed sources as citation chips plus the domain context for its fenced panel
 
 ## Running Tests
 
@@ -218,6 +226,8 @@ GET    /api/v1/conversations/{conv_id}/messages          Get messages
 cd backend
 python -m pytest tests/ -v
 ```
+
+An eval harness for research-mode behavior lives in `backend/tests/eval/` — `run_eval.py` (not pytest-collected) runs a 25-case set against a live knowledge base and writes timestamped JSON + markdown reports with automated structural checks.
 
 ## Deployment
 
@@ -243,11 +253,12 @@ docker run -p 8000:8000 --env-file .env cite-backend
 |-------|--------|-------------|
 | 1 | Complete | Backend skeleton + Frontend skeleton + Auth |
 | 2 | Complete | Knowledge Base CRUD |
-| 3 | Complete | Document Upload + AI-Powered Smart Chunking |
+| 3 | Complete | Document Upload + Smart Chunking |
 | 4 | Complete | RAG Chat — Intelligent Document Assistant |
 | 5 | Complete | Landing Page + Deploy (Vercel + Railway) |
-| 6 | Complete | Embeddable Widget |
-| 7 | Complete | Final Polish |
+| Research Mode | Complete | Two-channel answers, per-KB chat modes, domain profiles + suggested questions, eval harness |
+| 6 | Planned | Embeddable Widget |
+| 7 | Planned | Final Polish |
 
 ## License
 
