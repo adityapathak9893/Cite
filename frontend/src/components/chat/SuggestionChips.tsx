@@ -3,16 +3,21 @@ import { MessageSquare } from "lucide-react"
 interface SuggestionChipsProps {
   onSelect: (message: string) => void
   disabled?: boolean
+  /** KB-specific AI-generated questions; falls back to the generic set when null/empty. */
+  suggestions?: string[] | null
 }
 
-const SUGGESTIONS = [
+const FALLBACK_SUGGESTIONS = [
   "Summarize the key points",
   "What are the main topics covered?",
   "Find important dates and deadlines",
   "List the key terms and definitions",
 ]
 
-export function SuggestionChips({ onSelect, disabled }: SuggestionChipsProps) {
+export function SuggestionChips({ onSelect, disabled, suggestions }: SuggestionChipsProps) {
+  const items =
+    suggestions && suggestions.length > 0 ? suggestions : FALLBACK_SUGGESTIONS
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6">
       <MessageSquare
@@ -28,7 +33,7 @@ export function SuggestionChips({ onSelect, disabled }: SuggestionChipsProps) {
       </p>
 
       <div className="mt-6 flex flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((suggestion, i) => (
+        {items.map((suggestion, i) => (
           <button
             key={suggestion}
             type="button"

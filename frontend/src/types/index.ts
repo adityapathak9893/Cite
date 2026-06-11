@@ -4,6 +4,7 @@ export interface KnowledgeBase {
   name: string
   description: string | null
   is_public: boolean
+  suggested_questions: string[] | null
   created_at: string
   updated_at: string
   document_count: number
@@ -39,6 +40,8 @@ export interface Message {
   role: "user" | "assistant"
   content: string
   sources: Source[]
+  /** Research mode only — parsed DOMAIN_CONTEXT block (absent on older messages). */
+  domain_context?: string | null
   created_at: string
 }
 

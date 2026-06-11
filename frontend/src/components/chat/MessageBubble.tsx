@@ -1,69 +1,76 @@
-import { useMemo } from "react"
-import Markdown from "react-markdown"
-import { cn } from "@/lib/utils"
-import type { Message, Source } from "@/types"
-import { SourceCitation } from "./SourceCitation"
+import { useMemo } from "react";
+import Markdown from "react-markdown";
+import { cn } from "@/lib/utils";
+import type { Message, Source } from "@/types";
+import { DomainContextPanel } from "./DomainContextPanel";
+import { SourceCitation } from "./SourceCitation";
 
 /**
  * Clean assistant message text for display:
- * 1. Strip the ---SOURCES--- block (new format)
+ * 1. Strip the ---SOURCES--- and ---DOMAIN_CONTEXT--- blocks (new formats)
  * 2. Strip inline [Source: ...] citations (legacy format)
- * 3. Handle partial ---SOURCES--- marker during streaming
+ * 3. Handle partial block markers during streaming
  */
-const SOURCE_CITATION_RE = /\s*\[Source:\s*[^\]]+\]/g
-const SOURCES_BLOCK_RE = /\s*---SOURCES---[\s\S]*?---END_SOURCES---\s*/g
-const PARTIAL_MARKER = "---SOURCES---"
+const SOURCE_CITATION_RE = /\s*\[Source:\s*[^\]]+\]/g;
+const SOURCES_BLOCK_RE = /\s*---SOURCES---[\s\S]*?---END_SOURCES---\s*/g;
+const DOMAIN_BLOCK_RE =
+  /\s*---DOMAIN_CONTEXT---[\s\S]*?---END_DOMAIN_CONTEXT---\s*/g;
+const PARTIAL_MARKERS = ["---SOURCES---", "---DOMAIN_CONTEXT---"];
 
 function cleanMessageText(text: string): string {
-  // Strip complete SOURCES block
-  let cleaned = text.replace(SOURCES_BLOCK_RE, "")
+  // Strip complete SOURCES and DOMAIN_CONTEXT blocks
+  let cleaned = text.replace(SOURCES_BLOCK_RE, "").replace(DOMAIN_BLOCK_RE, "");
+  // A complete start marker with no end delimiter yet: hide everything from it on
+  const danglingStart = cleaned.indexOf("---DOMAIN_CONTEXT---");
+  if (danglingStart !== -1)
+    cleaned = cleaned.substring(0, danglingStart).trimEnd();
 
-  // Handle partial streaming — if text ends with the start of the marker, trim it
-  for (let i = Math.min(PARTIAL_MARKER.length, cleaned.length); i >= 3; i--) {
-    if (cleaned.endsWith(PARTIAL_MARKER.substring(0, i))) {
-      cleaned = cleaned.substring(0, cleaned.length - i)
-      break
+  // Handle partial streaming — if text ends with the start of a marker, trim it
+  for (const marker of PARTIAL_MARKERS) {
+    for (let i = Math.min(marker.length, cleaned.length); i >= 3; i--) {
+      if (cleaned.endsWith(marker.substring(0, i))) {
+        cleaned = cleaned.substring(0, cleaned.length - i);
+        break;
+      }
     }
   }
 
   // Strip legacy inline citations
-  cleaned = cleaned.replace(SOURCE_CITATION_RE, "")
+  cleaned = cleaned.replace(SOURCE_CITATION_RE, "");
 
-  return cleaned.trimEnd()
+  return cleaned.trimEnd();
 }
 
 interface MessageBubbleProps {
-  message: Message
-  isStreaming?: boolean
+  message: Message;
+  isStreaming?: boolean;
 }
 
-export function MessageBubble({ message, isStreaming = false }: MessageBubbleProps) {
-  const isUser = message.role === "user"
+export function MessageBubble({
+  message,
+  isStreaming = false,
+}: MessageBubbleProps) {
+  const isUser = message.role === "user";
 
   const displayContent = useMemo(
     () => (isUser ? message.content : cleanMessageText(message.content)),
-    [isUser, message.content]
-  )
+    [isUser, message.content],
+  );
 
   return (
     <div
       className={cn(
         "flex animate-[slide-up_200ms_var(--ease-out)]",
-        isUser ? "justify-end" : "justify-start"
+        isUser ? "justify-end" : "justify-start",
       )}
     >
-      <div
-        className={cn(
-          "relative",
-          isUser ? "max-w-[75%]" : "max-w-[85%]"
-        )}
-      >
+      <div className={cn("relative", isUser ? "max-w-[75%]" : "max-w-[85%]")}>
         <div
           className={cn(
             "px-4 py-3 text-base leading-relaxed",
             isUser
               ? "rounded-[16px_16px_4px_16px] bg-[var(--chat-user-bg)] text-[var(--chat-user-text)] shadow-sm"
-              : "rounded-[16px_16px_16px_4px] border border-[var(--border-primary)] bg-[var(--chat-assistant-bg)] text-[var(--chat-assistant-text)]"
+              : "rounded-[16px_16px_16px_4px] border border-[var(--border-primary)] bg-[var(--chat-assistant-bg)] text-[var(--chat-assistant-text)]",
           )}
         >
           {isUser ? (
@@ -93,24 +100,24 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
                     // Block code: rendered inside <pre><code>
                     const isBlock =
                       node?.position &&
-                      node.position.start.line !== node.position.end.line
+                      node.position.start.line !== node.position.end.line;
                     if (isBlock || className?.includes("language-")) {
                       return (
                         <code
                           className={cn(
                             "block overflow-x-auto rounded-md bg-[var(--bg-tertiary)] p-3 font-mono text-sm",
-                            className
+                            className,
                           )}
                         >
                           {children}
                         </code>
-                      )
+                      );
                     }
                     return (
                       <code className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-sm">
                         {children}
                       </code>
-                    )
+                    );
                   },
                   pre: ({ children }) => (
                     <pre className="mb-2 last:mb-0">{children}</pre>
@@ -131,6 +138,11 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
           )}
         </div>
 
+        {/* Domain context — research mode, below the answer and above citations */}
+        {!isUser && message.domain_context && !isStreaming && (
+          <DomainContextPanel content={message.domain_context} />
+        )}
+
         {/* Source citations — only for assistant messages with sources */}
         {!isUser && message.sources.length > 0 && !isStreaming && (
           <div className="mt-2 space-y-1.5">
@@ -141,13 +153,13 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
         )}
       </div>
     </div>
-  )
+  );
 }
 
 interface StreamingBubbleProps {
-  content: string
-  sources: Source[]
-  showSources: boolean
+  content: string;
+  sources: Source[];
+  showSources: boolean;
 }
 
 export function StreamingBubble({
@@ -162,7 +174,7 @@ export function StreamingBubble({
     content,
     sources: showSources ? sources : [],
     created_at: new Date().toISOString(),
-  }
+  };
 
-  return <MessageBubble message={message} isStreaming={!showSources} />
+  return <MessageBubble message={message} isStreaming={!showSources} />;
 }

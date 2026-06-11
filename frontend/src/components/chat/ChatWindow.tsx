@@ -10,9 +10,10 @@ import { SuggestionChips } from "./SuggestionChips"
 interface ChatWindowProps {
   kbId: string
   kbName: string
+  suggestedQuestions?: string[] | null
 }
 
-export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
+export function ChatWindow({ kbId, kbName, suggestedQuestions }: ChatWindowProps) {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -151,7 +152,11 @@ export function ChatWindow({ kbId, kbName }: ChatWindowProps) {
         ) : isLoadingMessages ? (
           null
         ) : !hasMessages ? (
-          <SuggestionChips onSelect={handleSend} disabled={isStreaming} />
+          <SuggestionChips
+            onSelect={handleSend}
+            disabled={isStreaming}
+            suggestions={suggestedQuestions}
+          />
         ) : (
           <div className="space-y-4 p-4 sm:p-6">
             {messages.map((msg) => (

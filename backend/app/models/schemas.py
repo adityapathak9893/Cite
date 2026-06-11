@@ -43,6 +43,7 @@ class KnowledgeBaseResponse(BaseModel):
     name: str
     description: str | None
     is_public: bool
+    suggested_questions: list[str] | None = None
     created_at: datetime
     updated_at: datetime
     document_count: int

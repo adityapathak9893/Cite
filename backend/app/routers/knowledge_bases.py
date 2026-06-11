@@ -25,6 +25,7 @@ def _row_to_response(row: dict, document_count: int) -> KnowledgeBaseResponse:
         name=row["name"],
         description=row.get("description"),
         is_public=row.get("is_public", False),
+        suggested_questions=row.get("suggested_questions"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         document_count=document_count,

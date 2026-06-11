@@ -142,6 +142,7 @@ export function useSendMessage(kbId: string) {
         let buffer = ""
         let fullContent = ""
         let sources: Source[] = []
+        let domainContext: string | null = null
         let newConversationId = conversationId
         let receivedFirstToken = false
 
@@ -178,6 +179,7 @@ export function useSendMessage(kbId: string) {
 
             if (data.done) {
               sources = (data.sources as Source[]) || []
+              domainContext = (data.domain_context as string | null) ?? null
               newConversationId =
                 (data.conversation_id as string) || conversationId
               setStreamingSources(sources)
@@ -188,9 +190,11 @@ export function useSendMessage(kbId: string) {
           }
         }
 
-        // Strip ---SOURCES--- block from cached content (backend saves clean text)
+        // Strip ---SOURCES--- and ---DOMAIN_CONTEXT--- blocks from cached content
+        // (backend saves clean text)
         const cleanContent = fullContent
           .replace(/\s*---SOURCES---[\s\S]*?---END_SOURCES---\s*/g, "")
+          .replace(/\s*---DOMAIN_CONTEXT---[\s\S]*?---END_DOMAIN_CONTEXT---\s*/g, "")
           .trimEnd()
 
         // Build the complete assistant message
@@ -200,6 +204,7 @@ export function useSendMessage(kbId: string) {
           role: "assistant",
           content: cleanContent,
           sources,
+          domain_context: domainContext,
           created_at: new Date().toISOString(),
         }
 

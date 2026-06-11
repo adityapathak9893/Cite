@@ -107,6 +107,7 @@ export default function KnowledgeBase() {
           <ChatWindow
             kbId={kbId}
             kbName={kb?.name ?? "Knowledge Base"}
+            suggestedQuestions={kb?.suggested_questions ?? null}
           />
         </div>
       </div>
