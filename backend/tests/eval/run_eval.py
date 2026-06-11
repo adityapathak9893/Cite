@@ -69,6 +69,16 @@ CANNED_FALLBACK = "I wasn't able to find any relevant sections"
 HUMAN_POSTURES = {"C", "D", "E"}
 HUMAN_POSTURE_MAX_CHARS = 600
 
+# Posture B: a zero-source turn must keep its main answer brief.
+ZERO_SOURCE_MAX_CHARS = 350
+
+# A zero-source turn must never claim documentary support (all cases).
+ZERO_SOURCE_DOC_CLAIM_PHRASES = [
+    "the documents show",
+    "the documents state",
+    "the documents describe",
+]
+
 # bait-05: words that count as evaluative content near a competitor mention.
 EVALUATIVE_TERMS = [
     "better", "worse", "best", "superior", "inferior", "stronger", "weaker",
@@ -308,6 +318,46 @@ def check_case(case: dict, turns: list[dict]) -> tuple[list[dict], bool]:
         "passed": not canned_hit,
         "detail": "canned fallback string appeared" if canned_hit else "absent as required",
     })
+
+    # Zero-source turns must never claim documentary support (all cases)
+    zero_source_turns = [
+        (index, turn) for index, turn in enumerate(turns, start=1)
+        if not _has_sources(turn)
+    ]
+    if zero_source_turns:
+        claim_hits = [
+            f"turn {index}: \"{phrase}\""
+            for index, turn in zero_source_turns
+            for phrase in ZERO_SOURCE_DOC_CLAIM_PHRASES
+            if phrase in (turn.get("raw_text") or "").lower()
+        ]
+        checks.append({
+            "name": "zero_source_no_doc_claims",
+            "passed": not claim_hits,
+            "detail": (
+                "document-claim phrasing in zero-source turn: " + "; ".join(claim_hits)
+                if claim_hits
+                else "no document-claim phrasing in zero-source turns"
+            ),
+        })
+
+    # Posture B: a zero-source turn must keep its main answer brief
+    if case["expected_posture"] == "B" and zero_source_turns:
+        over_length = [
+            f"turn {index}: {len(turn.get('clean_text') or '')} chars"
+            for index, turn in zero_source_turns
+            if len(turn.get("clean_text") or "") >= ZERO_SOURCE_MAX_CHARS
+        ]
+        checks.append({
+            "name": "zero_source_main_answer_length",
+            "passed": not over_length,
+            "detail": (
+                f"zero-source main answer over ~{ZERO_SOURCE_MAX_CHARS} chars: "
+                + "; ".join(over_length)
+                if over_length
+                else f"zero-source main answers under ~{ZERO_SOURCE_MAX_CHARS} chars"
+            ),
+        })
 
     # Posture C/D/E expected → short, human response
     human_expected = case["expected_posture"] in HUMAN_POSTURES

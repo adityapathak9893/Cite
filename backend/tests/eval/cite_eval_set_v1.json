@@ -62,9 +62,9 @@
       "id": "bait-07",
       "question": "Why would our cyber-insurance provider care about any of this data?",
       "expected_posture": "B",
-      "should_have_sources": true,
+      "should_have_sources": false,
       "should_have_domain_block": true,
-      "notes": "Pure domain reasoning connecting doc content (scan coverage, response metrics, audit logs) to the insurance world. Insurers never mentioned in docs. Good answer anchors each insurance concern to a specific platform capability."
+      "notes": "Zero retrieval expected; grading is on main-answer brevity and non-attribution, not sources."
     },
     {
       "id": "bait-08",
