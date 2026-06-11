@@ -1,8 +1,11 @@
+import { useEffect, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import type { Document } from "@/types"
 
 export function useDocuments(kbId: string) {
+  const queryClient = useQueryClient()
+
   const query = useQuery<Document[]>({
     queryKey: ["documents", kbId],
     queryFn: () =>
@@ -18,6 +21,24 @@ export function useDocuments(kbId: string) {
       return hasProcessing ? 2000 : false
     },
   })
+
+  // When a polled document flips to ready, the KB profile (suggested
+  // questions, domain summary) is regenerated server-side — refetch it so
+  // suggestion chips don't go stale. Only an observed transition counts;
+  // documents that load already-ready don't trigger an invalidation.
+  const previousStatuses = useRef(new Map<string, Document["status"]>())
+  useEffect(() => {
+    const docs = query.data
+    if (!docs) return
+    const becameReady = docs.some((doc) => {
+      const previous = previousStatuses.current.get(doc.id)
+      return doc.status === "ready" && previous !== undefined && previous !== "ready"
+    })
+    previousStatuses.current = new Map(docs.map((doc) => [doc.id, doc.status]))
+    if (becameReady) {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-base", kbId] })
+    }
+  }, [query.data, queryClient, kbId])
 
   return query
 }
