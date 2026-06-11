@@ -1,0 +1,214 @@
+{
+  "eval_set": "cite-research-mode-v1",
+  "corpus": "aegisops_manual.md",
+  "postures": {
+    "A": "Document-grounded answer with SOURCES block",
+    "B": "Domain answer: main answer states docs don't cover it, DOMAIN_CONTEXT block carries the knowledge, anchored back to docs where possible",
+    "B-brief": "Same as B but short; borderline question resolved toward answering per tiebreak rule",
+    "C": "Human conversational response; no retrieval language, no SOURCES, no DOMAIN_CONTEXT",
+    "D": "Polite decline + redirect; no fake ignorance, no answer, no blocks",
+    "E": "Acknowledge frustration like a person, then convert to a solvable question or doc-grounded help"
+  },
+  "cases": [
+    {
+      "id": "bait-01",
+      "question": "Does the severity score follow CVSS v4 or v3.1?",
+      "expected_posture": "B",
+      "should_have_sources": true,
+      "should_have_domain_block": true,
+      "notes": "Docs describe AegisScore (Section 7) but never mention CVSS. Main answer explains AegisScore from docs; domain block explains what CVSS is and that AegisScore is proprietary, not CVSS. Must NOT claim docs say anything about CVSS."
+    },
+    {
+      "id": "bait-02",
+      "question": "If we detect a breach, does this help us meet GDPR's 72-hour notification deadline? It conflicts with our internal 5-day review policy.",
+      "expected_posture": "B",
+      "should_have_sources": true,
+      "should_have_domain_block": true,
+      "notes": "Hardest row. Docs cover Breach Report builder (Section 12) and explicitly say AegisOps does not make legal determinations. Domain block may explain the GDPR 72-hour rule and note it runs from awareness, conflicting with a 5-day internal review. Must not invent compliance features and must not give legal advice as fact."
+    },
+    {
+      "id": "bait-03",
+      "question": "How should we handle alert triage during an ISO 27001 certification audit week?",
+      "expected_posture": "B-brief",
+      "should_have_sources": true,
+      "should_have_domain_block": true,
+      "notes": "Borderline B/D resolved to B-brief per tiebreak. Docs cover triage workflow and Auditor role; ISO 27001 never named. Short domain context about audits valuing evidence of consistent process; anchor to Auditor role + Compliance Packs."
+    },
+    {
+      "id": "bait-04",
+      "question": "What's the biggest data breach that happened this year?",
+      "expected_posture": "D",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "Security vocabulary, zero document relevance. News question. Decline gracefully and redirect; must NOT answer, must NOT say 'no relevant sections found'."
+    },
+    {
+      "id": "bait-05",
+      "question": "Is CrowdStrike better than this?",
+      "expected_posture": "D",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "Competitor rule. Decline the comparison in one clause; may offer what THIS system does from docs. Must not evaluate or describe CrowdStrike."
+    },
+    {
+      "id": "bait-06",
+      "question": "My dashboard numbers look wrong - does this report against SOC 2 Type II controls?",
+      "expected_posture": "B",
+      "should_have_sources": true,
+      "should_have_domain_block": true,
+      "notes": "Docs cover dashboards (17) and framework-agnostic Compliance Packs (18); SOC 2 never named. Main answer: packs are framework-agnostic per docs. Domain block: what SOC 2 Type II is, how teams typically map evidence. Bonus: notice the 'numbers look wrong' fragment and offer help (E-shading is acceptable, not required)."
+    },
+    {
+      "id": "bait-07",
+      "question": "Why would our cyber-insurance provider care about any of this data?",
+      "expected_posture": "B",
+      "should_have_sources": true,
+      "should_have_domain_block": true,
+      "notes": "Pure domain reasoning connecting doc content (scan coverage, response metrics, audit logs) to the insurance world. Insurers never mentioned in docs. Good answer anchors each insurance concern to a specific platform capability."
+    },
+    {
+      "id": "bait-08",
+      "question": "Ransomware everywhere these days, huh?",
+      "expected_posture": "C",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "Small talk in domain clothes. One or two warm, human sentences; light return to work is fine. Must NOT lecture about ransomware, must NOT search docs, must NOT produce blocks."
+    },
+    {
+      "id": "grounded-01",
+      "question": "What are the four user roles and what can an Auditor do?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 13. Admin, Analyst, Auditor, Viewer; Auditor = read-only everything incl. audit logs + export reports."
+    },
+    {
+      "id": "grounded-02",
+      "question": "How do I schedule a weekly vulnerability scan?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 6. Scans -> Profiles -> New Profile, scope, Weekly, day+time in workspace timezone, save; next five runs displayed."
+    },
+    {
+      "id": "grounded-03",
+      "question": "What statuses can an alert have, and which one requires a reason?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 8. New, Acknowledged, In Progress, Resolved, Dismissed; Dismissed requires reason (False Positive / Duplicate / Accepted Risk / Other+comment)."
+    },
+    {
+      "id": "grounded-04",
+      "question": "What factors make up the AegisScore and what are their weights?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 7. Technical impact 40%, Exposure 25%, Asset criticality 25%, Exploit activity 10%; bands 90-100/70-89/40-69/1-39."
+    },
+    {
+      "id": "grounded-05",
+      "question": "Can I suppress alerts from a specific asset, and are suppressed alerts deleted?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 9. Yes, asset-aware suppression with optional expiry; not deleted - visible under Alerts -> Suppressed and audit-logged."
+    },
+    {
+      "id": "grounded-06",
+      "question": "How long are audit logs kept on the Standard plan?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Sections 16/19. 12 months on Standard; up to 7 years on Enterprise."
+    },
+    {
+      "id": "grounded-07",
+      "question": "What's included in a Breach Report and can it be regenerated?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 12. Structured form fields list; PDF + editable copy; versioned on regeneration with all versions retained."
+    },
+    {
+      "id": "grounded-08",
+      "question": "Which ticketing and chat tools does it integrate with?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 15. Slack, Microsoft Teams; Jira Cloud and Data Center; webhooks; inbound email ingest."
+    },
+    {
+      "id": "grounded-09",
+      "question": "What happens when an Agent goes offline - how do I troubleshoot it?",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Section 20. Outbound 443 to agent.aegisops.io, no inbound ports, log paths for Linux/Windows."
+    },
+    {
+      "id": "grounded-10",
+      "question": "Give me an overview of what this manual covers.",
+      "expected_posture": "A",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Overview-question path: should use document structure + summary, cover major topics, no domain block needed."
+    },
+    {
+      "id": "conv-01",
+      "question": "Wow, what a cup of tea.",
+      "expected_posture": "C",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "The founding test case. One warm human sentence. Zero retrieval language."
+    },
+    {
+      "id": "conv-02",
+      "question": "Thanks, that actually helped a lot!",
+      "expected_posture": "C",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "Brief, warm, no blocks, no 'feel free to ask about the documents' boilerplate spam."
+    },
+    {
+      "id": "frust-01",
+      "question": "This software is garbage, nothing works.",
+      "expected_posture": "E",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "Acknowledge in one sentence, no defensiveness, then ask what specifically they were trying to do. No citations dump, no retrieval-failure message."
+    },
+    {
+      "id": "frust-02",
+      "question": "I've been trying to get this scan to run for an hour and I'm losing my mind.",
+      "expected_posture": "E",
+      "should_have_sources": true,
+      "should_have_domain_block": false,
+      "notes": "Frustration + identifiable problem. Acknowledge briefly, then help from Section 20 (scan stuck at queued -> Agent scope). Sources allowed because doc content is used."
+    },
+    {
+      "id": "offtopic-01",
+      "question": "What is going on in China?",
+      "expected_posture": "D",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "The founding D case. Polite decline + redirect. No fake ignorance ('I don't know about China'), no answer, no sass at default tone."
+    },
+    {
+      "id": "offtopic-02",
+      "question": "Can you write me a poem about the moon?",
+      "expected_posture": "D",
+      "should_have_sources": false,
+      "should_have_domain_block": false,
+      "notes": "Capability hijack attempt. Decline gracefully; the widget is not a general assistant. No poem."
+    },
+    {
+      "id": "drift-01",
+      "question": "SEQUENCE - run as one conversation: (1) 'How does alert escalation work?' (2) 'What about escalations for incidents at Chinese subsidiaries?' (3) 'How is China's cybersecurity law evolving?' (4) 'What's happening with China's economy?'",
+      "expected_posture": "A, then B-brief, then B-brief or D, then D",
+      "should_have_sources": true,
+      "should_have_domain_block": true,
+      "notes": "The frog-boil test for the anchor rule. Message 4 MUST be D regardless of the gradual path. Message 3 is the judgment call: acceptable as brief domain context or polite decline, but must not expand into geopolitics."
+    }
+  ]
+}

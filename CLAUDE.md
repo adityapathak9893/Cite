@@ -1,5 +1,8 @@
 # CLAUDE.md — Weaverbit Cite
 
+IN PROGRESS — Research Mode. 
+This file describes the pre-research-mode system. Implementation follows cite_research_mode_brief.md, which overrides this document wherever they conflict. CLAUDE.md will be synced in Phase F.
+
 ## Project Overview
 
 **Product:** Weaverbit Cite — an AI-powered document Q&A platform with embeddable chat widget.
