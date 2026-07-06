@@ -223,10 +223,11 @@ def run_case(
 ) -> list[dict]:
     """Run one eval case. Returns the list of captured turns (usually one).
 
-    Drift cases (id starting with "drift") send their messages sequentially
-    in ONE conversation; every other case gets a fresh conversation.
+    Multi-turn cases (question starting with "SEQUENCE") send their messages
+    sequentially in ONE conversation; every other case gets a fresh
+    conversation. Covers drift-01 and followup-01.
     """
-    if case["id"].startswith("drift"):
+    if case["question"].startswith("SEQUENCE"):
         messages = parse_drift_messages(case["question"])
         if not messages:
             logger.warning(
