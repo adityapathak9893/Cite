@@ -21,6 +21,12 @@ OVERVIEW_KEYWORDS = [
     "highlights", "table of contents", "what are the sections",
     "what topics", "give me an overview", "walk me through",
     "what's in this", "what is in this", "brief me", "catch me up",
+    # Coverage / absence phrasings — an absence claim ("X isn't covered") is
+    # only groundable against the full document structure; retrieved chunks
+    # cannot prove what other chunks lack. Route these through structure fetch.
+    "not covered", "does it cover", "doesn't cover", "what's missing",
+    "what is missing", "doesn't include", "not included",
+    "what topics are absent", "not in this doc", "not in the document",
 ]
 
 
