@@ -1,0 +1,39 @@
+{
+  "benchmark": "cite-retrieval-hybrid-v1",
+  "description": "Retrieval-only benchmark for hybrid search (migration 002). Runs directly against match_chunks_hybrid — no generation, no LLM nondeterminism. Each query must retrieve its expected section at rank <= rank_threshold in the RRF-fused results. Seeded with grounded-02's flagship query plus keyword-exact stress queries whose target section is title-anchored (the class vector-only retrieval is blind to). expected_section is the chunk_index, which for the AegisOps manual equals the manual's section number (chunk 0 = summary; chunks 1-20 = sections 1-20).",
+  "kb_id": "cb9a2c08-460e-40fd-b4ad-f8b7915a406a",
+  "corpus": "aegisops_manual.md",
+  "rank_threshold": 3,
+  "queries": [
+    {
+      "query": "How do I schedule a weekly vulnerability scan?",
+      "expected_section": 6,
+      "expected_title": "6. Scan Scheduling & Scan Profiles",
+      "note": "Flagship (grounded-02). Failed vector-only 3 consecutive runs. The stem 'schedul' is right in the title but absent from the embedding-nearest sections. Section 6 does NOT contain the word 'vulnerability' (that lives in section 5), so AND-of-all-terms FTS would exclude it — OR-recall matches schedul|week|scan and ts_rank ranks section 6 top of the lexical channel."
+    },
+    {
+      "query": "How do I suppress noisy alerts?",
+      "expected_section": 9,
+      "expected_title": "9. Alert Rules & Suppression",
+      "note": "'Suppress' is title-anchored (section 9: Alert Rules & Suppression). Section 9 lacks the word 'noisy', so OR-recall (suppress|alert) carries it while AND would drop it. Multiple sections mention 'alert' (8, 10) — tests that ts_rank favours the suppression section."
+    },
+    {
+      "query": "How do I deploy a monitoring agent?",
+      "expected_section": 4,
+      "expected_title": "4. Asset Discovery & Agent Deployment",
+      "note": "'deploy'/'agent' are title-anchored (section 4). 'agent' also appears in sections 8 and 20 (offline-agent troubleshooting), so this tests lexical disambiguation toward the deployment section."
+    },
+    {
+      "query": "Where do I generate a breach report?",
+      "expected_section": 12,
+      "expected_title": "12. Breach Reports",
+      "note": "Exact feature name in the title (section 12). All stems (breach, report, generat) are present — a clean lexical hit that should dominate its FTS rank."
+    },
+    {
+      "query": "How do I set up single sign-on?",
+      "expected_section": 14,
+      "expected_title": "14. Single Sign-On & MFA",
+      "note": "Exact feature name 'single sign-on' + SSO/SAML/MFA all present in section 14. Distinctive vocabulary that vector search may under-rank against generic 'set up' phrasing."
+    }
+  ]
+}
