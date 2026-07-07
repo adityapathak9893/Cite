@@ -31,7 +31,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_ROOT))
 load_dotenv(BACKEND_ROOT / ".env", override=False)
 
-from app.config import settings  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app.services.embedding import embed_texts  # noqa: E402
 from supabase import create_client  # noqa: E402
 
@@ -76,6 +76,7 @@ def evaluate(spec: dict) -> tuple[list[dict], bool]:
     threshold = spec.get("rank_threshold", 3)
     queries = spec["queries"]
 
+    settings = get_settings()
     supabase = create_client(settings.supabase_url, settings.supabase_service_key)
     embeddings = asyncio.run(embed_texts([q["query"] for q in queries]))
 
