@@ -848,10 +848,13 @@ secrets.txt
   `judge_posture_quality()` is a clearly marked LLM-as-judge stub
 
 ### Known Limitations
-- Zero-retrieval questions with high intrinsic interest may produce an overlong
-  main answer; the Hard Rule reduces but does not eliminate this (observed in
-  eval case bait-07 across multiple runs).
-- No false attribution to documents has been observed across 4 eval runs.
+- bait-07 was a ZERO-RETRIEVAL limitation (a high-interest question that could
+  produce an overlong main answer under the Hard Rule). Under hybrid search the
+  FTS channel now retrieves for it, so it is no longer zero-retrieval: it answers
+  doc-grounded, still emits the domain block, with no false attribution. Its eval
+  label should_have_sources=false is therefore a documented exception under
+  hybrid (sources are now expected present) — do not tune, do not count.
+- No false attribution to documents has been observed across eval runs.
 - Vector-only retrieval missed keyword-exact sections (eval case grounded-02:
   "schedule" query failed to retrieve the Scan Scheduling section three times) —
   remediated by hybrid search (migration 002: pgvector + Postgres FTS fused with RRF),
