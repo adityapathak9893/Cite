@@ -850,10 +850,12 @@ secrets.txt
 ### Known Limitations
 - bait-07 was a ZERO-RETRIEVAL limitation (a high-interest question that could
   produce an overlong main answer under the Hard Rule). Under hybrid search the
-  FTS channel now retrieves for it, so it is no longer zero-retrieval: it answers
-  doc-grounded, still emits the domain block, with no false attribution. Its eval
-  label should_have_sources=false is therefore a documented exception under
-  hybrid (sources are now expected present) — do not tune, do not count.
+  FTS channel VARIABLY retrieves for it: when it does, bait-07 answers doc-grounded
+  with sources present; when it doesn't (e.g. run 160958), the original overlong
+  zero-retrieval answer recurs. No false attribution in any mode. Its eval label
+  should_have_sources=false therefore flags whichever way the coin lands (present
+  sources, or an overlong zero-source answer) — a documented exception, do not tune,
+  do not count.
 - No false attribution to documents has been observed across eval runs.
 - Vector-only retrieval missed keyword-exact sections (eval case grounded-02:
   "schedule" query failed to retrieve the Scan Scheduling section three times) —

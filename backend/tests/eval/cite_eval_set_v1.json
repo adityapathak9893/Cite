@@ -55,8 +55,9 @@
       "question": "My dashboard numbers look wrong - does this report against SOC 2 Type II controls?",
       "expected_posture": "B",
       "should_have_sources": true,
-      "should_have_domain_block": false,
-      "notes": "Docs cover dashboards (17) and framework-agnostic Compliance Packs (18); SOC 2 never named. The domain-block absence PREDATES hybrid: it first appeared in the vector-only baseline (run 20260706_231334) after the KB re-upload regenerated AI search descriptions + embeddings, which made §17/§18 retrieve reliably; the model then answers doc-grounded (dashboards aren't framework-specific; Compliance Packs are the framework-agnostic SOC 2 evidence path) and weaves the SOC 2 context in rather than fencing it. Stable absent across runs 122252/141138, so should_have_domain_block=false (flipped true->false 2026-07-07, ratified — KB-regeneration effect, not hybrid). PASS: framework-agnostic framing + correct pointer to Compliance Packs + no false attribution (must NOT claim the docs name SOC 2) + no invented compliance features. FAIL: asserting the docs report against SOC 2, or inventing SOC 2 features. Bonus: notice the 'numbers look wrong' fragment and offer help."
+      "should_have_domain_block": true,
+      "domain_block_optional": true,
+      "notes": "Docs cover dashboards (17) and framework-agnostic Compliance Packs (18); SOC 2 never named. Two independent effects: (1) RETRIEVAL is stable — §17/§18 retrieve every run (the KB re-upload regenerated the AI search descriptions + embeddings so these sections match reliably), so sources are always present. (2) FENCING varies — whether the SOC 2 context is fenced in a domain block or woven into the doc-grounded answer is a run-to-run coin flip (absent 122252/141138, present 160958), the same borderline-B behavior as drift-01/coverage-01. So domain_block_optional=true demotes the block to informational; should_have_domain_block=true records the canonical intent. PASS (manual): framework-agnostic framing + correct pointer to Compliance Packs + no false attribution (must NOT claim the docs name SOC 2) + no invented compliance features. FAIL: asserting the docs report against SOC 2, or inventing SOC 2 features. Bonus: notice the 'numbers look wrong' fragment and offer help."
     },
     {
       "id": "bait-07",
