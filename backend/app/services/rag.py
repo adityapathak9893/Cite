@@ -4,12 +4,11 @@ from supabase import Client
 
 logger = logging.getLogger(__name__)
 
-# Similarity thresholds — moderate first-pass, low fallback for small datasets.
-# We fetch extra candidates then trim to MAX_RETURN for precision.
-DEFAULT_THRESHOLD = 0.5
-RETRY_THRESHOLD = 0.3
-CANDIDATE_COUNT = 8   # fetch up to 8 from DB
-MAX_RETURN = 5         # return top 5 to Claude (AI chunks are more precise)
+# Hybrid retrieval (migration 002) fuses a pgvector channel and a Postgres FTS
+# channel with Reciprocal Rank Fusion. The tuning knobs — vector top-20 @ floor
+# 0.3, FTS top-10, RRF k=60, final top-5 — live in the match_chunks_hybrid RPC
+# signature (single source of truth); this module just calls it. The old
+# 0.5/0.3 two-step vector-only path was removed with the same migration.
 
 # ─── Overview question detection ───
 
@@ -133,48 +132,29 @@ def build_context(
     return "\n".join(context_parts)
 
 
-# ─── Vector search ───
-
-
-def _call_match_chunks(
-    supabase: Client,
-    query_embedding: list[float],
-    kb_id: str,
-    match_count: int,
-    threshold: float,
-) -> list[dict]:
-    """Call the match_chunks RPC, passing the embedding as a list (not a string).
-
-    Supabase PostgREST expects JSON arrays for vector parameters.
-    """
-    result = supabase.rpc("match_chunks", {
-        "query_embedding": query_embedding,
-        "target_kb_id": kb_id,
-        "match_count": match_count,
-        "match_threshold": threshold,
-    }).execute()
-
-    return result.data or []
+# ─── Hybrid search (vector + FTS, RRF-fused) ───
 
 
 def search_similar_chunks(
     supabase: Client,
     query_embedding: list[float],
+    query_text: str,
     kb_id: str,
-    match_count: int = CANDIDATE_COUNT,
-    threshold: float = DEFAULT_THRESHOLD,
 ) -> list[dict]:
-    """Search for similar document chunks using the match_chunks PostgreSQL function.
+    """Retrieve the most relevant chunks via the match_chunks_hybrid RPC.
 
-    If fewer than 2 results above the threshold, retries with a lower threshold.
-    Returns chunks with content, metadata, similarity, document_id, file_name, chunk_index.
+    Runs a pgvector channel and a Postgres FTS channel and fuses their rankings
+    with Reciprocal Rank Fusion (migration 002). Zero retrieval means BOTH
+    channels came back empty. Returns the fused top chunks in RRF order (best
+    first), each with content, metadata, similarity, document_id, chunk_index,
+    plus the per-channel ranks and rrf_score, enriched with file_name.
     """
     logger.info(
-        "Vector search | kb_id=%s | embedding_dims=%d | threshold=%.2f",
-        kb_id, len(query_embedding), threshold,
+        "Hybrid search | kb_id=%s | embedding_dims=%d | query=%s",
+        kb_id, len(query_embedding), query_text[:100],
     )
 
-    # Sanity check: verify chunks exist for this KB
+    # Sanity check: verify chunks exist for this KB (cheap guard + useful log).
     count_result = (
         supabase.table("document_chunks")
         .select("id", count="exact")
@@ -189,48 +169,25 @@ def search_similar_chunks(
         logger.info("No chunks stored for this KB | kb_id=%s", kb_id)
         return []
 
-    chunks = _call_match_chunks(
-        supabase, query_embedding, kb_id, match_count, threshold
-    )
-
-    logger.info(
-        "match_chunks returned %d results at threshold=%.2f | kb_id=%s",
-        len(chunks), threshold, kb_id,
-    )
-
-    # Only retry on zero results — don't dilute precision with low-similarity chunks
-    if len(chunks) == 0 and threshold > RETRY_THRESHOLD:
-        logger.info(
-            "Retrying with threshold=%.2f | kb_id=%s", RETRY_THRESHOLD, kb_id
-        )
-        chunks = _call_match_chunks(
-            supabase, query_embedding, kb_id, match_count, RETRY_THRESHOLD
-        )
-        logger.info(
-            "Retry returned %d results | kb_id=%s", len(chunks), kb_id
-        )
+    # The embedding goes over the wire as a JSON array (PostgREST casts to vector).
+    # Tuning params default in the RPC signature; we pass only the query inputs.
+    result = supabase.rpc("match_chunks_hybrid", {
+        "p_kb_id": kb_id,
+        "p_query_embedding": query_embedding,
+        "p_query_text": query_text,
+    }).execute()
+    chunks = result.data or []
 
     if not chunks:
         logger.warning(
-            "No similar chunks found even at threshold=%.2f | kb_id=%s | "
-            "total_chunks_in_kb=%d — check IVFFlat index (lists may be too high for row count)",
-            RETRY_THRESHOLD, kb_id, total_chunks,
+            "Zero retrieval — both vector and FTS channels empty | kb_id=%s | "
+            "total_chunks_in_kb=%d",
+            kb_id, total_chunks,
         )
         return []
 
-    # Fetch chunk_index (not returned by match_chunks) and file_name
-    chunk_ids = [c["id"] for c in chunks]
+    # The RPC returns chunk_index + metadata; only file_name needs a lookup.
     doc_ids = list({c["document_id"] for c in chunks})
-
-    chunk_details = (
-        supabase.table("document_chunks")
-        .select("id, chunk_index, metadata")
-        .in_("id", chunk_ids)
-        .execute()
-    )
-    index_map = {d["id"]: d["chunk_index"] for d in (chunk_details.data or [])}
-    metadata_map = {d["id"]: (d.get("metadata") or {}) for d in (chunk_details.data or [])}
-
     docs_result = (
         supabase.table("documents")
         .select("id, file_name")
@@ -238,37 +195,33 @@ def search_similar_chunks(
         .execute()
     )
     name_map = {d["id"]: d["file_name"] for d in (docs_result.data or [])}
-
     for chunk in chunks:
-        chunk["chunk_index"] = index_map.get(chunk["id"], 0)
         chunk["file_name"] = name_map.get(chunk["document_id"], "Unknown")
-        chunk["metadata"] = metadata_map.get(chunk["id"], {})
 
-    # Sort by similarity descending (should already be, but enforce it)
-    chunks.sort(key=lambda c: c.get("similarity", 0), reverse=True)
-
-    # Debug log: every candidate with score + content preview
+    # Preserve the RPC's fused (rrf_score) order — do NOT re-sort by similarity,
+    # which would undo the ranking that lifts keyword-matched sections.
     for i, c in enumerate(chunks):
         meta = c.get("metadata") or {}
         logger.info(
-            "Chunk candidate %d | similarity=%.4f | file=%s | section=%d | title=%s | preview=%s | kb_id=%s",
+            "Hybrid candidate %d | rrf=%.5f | vec_rank=%s | fts_rank=%s | "
+            "sim=%.4f | file=%s | section=%s | title=%s | preview=%s | kb_id=%s",
             i + 1,
-            c.get("similarity", 0),
+            c.get("rrf_score") or 0,
+            c.get("vector_rank"),
+            c.get("fts_rank"),
+            c.get("similarity") or 0,
             c.get("file_name", "?"),
-            c.get("chunk_index", 0),
+            c.get("chunk_index"),
             meta.get("title", "?"),
             c.get("content", "")[:100].replace("\n", " "),
             kb_id,
         )
 
-    # Trim to top MAX_RETURN chunks for precision
-    chunks = chunks[:MAX_RETURN]
-
     logger.info(
-        "Returning %d chunks (from %d candidates) | kb_id=%s | top=%.3f | bottom=%.3f",
-        len(chunks), len(chunk_ids), kb_id,
-        chunks[0].get("similarity", 0),
-        chunks[-1].get("similarity", 0),
+        "Returning %d fused chunks | kb_id=%s | top_rrf=%.5f | bottom_rrf=%.5f",
+        len(chunks), kb_id,
+        chunks[0].get("rrf_score") or 0,
+        chunks[-1].get("rrf_score") or 0,
     )
 
     return chunks
