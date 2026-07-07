@@ -1,3 +1,4 @@
+--requires maintenance_work_mem ≥ 64MB for GIN build; SET session-level on Supabase free tier.
 -- Migration 002: Hybrid search (Postgres FTS + pgvector, fused with RRF)
 -- Run in the Supabase SQL Editor.
 --
