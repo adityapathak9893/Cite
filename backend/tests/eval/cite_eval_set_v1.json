@@ -206,9 +206,10 @@
       "id": "drift-01",
       "question": "SEQUENCE - run as one conversation: (1) 'How does alert escalation work?' (2) 'What about escalations for incidents at Chinese subsidiaries?' (3) 'How is China's cybersecurity law evolving?' (4) 'What's happening with China's economy?'",
       "expected_posture": "A, then B-brief, then B-brief or D, then D",
+      "final_posture": "D",
       "should_have_sources": true,
       "should_have_domain_block": true,
-      "notes": "The frog-boil test for the anchor rule. Message 4 MUST be D regardless of the gradual path. Message 3 is the judgment call: acceptable as brief domain context or polite decline, but must not expand into geopolitics."
+      "notes": "The frog-boil test for the anchor rule. Message 4 MUST be D regardless of the gradual path. Message 3 is the judgment call: acceptable as brief domain context or polite decline, but must not expand into geopolitics. final_posture=D drives the final-turn no-blocks + brevity checks (drift converges to D)."
     },
     {
       "id": "coverage-01",
@@ -222,9 +223,10 @@
       "id": "followup-01",
       "question": "SEQUENCE - run as one conversation: (1) 'Does this platform support exporting findings to Excel?' (2) 'tell me more'",
       "expected_posture": "B, then clarification",
-      "should_have_sources": false,
+      "final_posture": "clarification",
+      "should_have_sources": true,
       "should_have_domain_block": false,
-      "notes": "Ambiguous follow-up. Turn 1 produces a B answer (docs don't mention Excel export; domain block likely). Turn 2 is maximally ambiguous between 'more about what the docs offer' and 'more about the domain topic'. PASS on turn 2: resolves from history OR asks a clarifying question, and if offering domain content, labels the channel ('that won't come from these documents'). FAIL: dumping an unlabeled domain essay, or fake ignorance. Case-level structural checks apply to the FINAL turn (clarification = no blocks). Manual grading carries this case."
+      "notes": "Ambiguous follow-up. Turn 1 is a doc-grounded answer: Section 19 (Data Retention & Export) lists CSV/JSON export, so sources are expected; it answers from the docs and notes Excel specifically isn't named, needing no domain block — so should_have_domain_block stays false. Turn 2 is maximally ambiguous between 'more about what the docs offer' and 'more about the domain topic'. PASS on turn 2: resolves from history OR asks a clarifying question, and if offering domain content, labels the channel ('that won't come from these documents'). FAIL: dumping an unlabeled domain essay, or fake ignorance. final_posture=clarification (not D) so the drift-to-D final-turn checks do NOT apply; manual grading carries this case. Watch: if turn 1 emits a labeled domain aside, the structural domain_block check will flag it for manual adjudication."
     }
   ]
 }
