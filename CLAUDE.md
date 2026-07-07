@@ -124,15 +124,20 @@ cite/
 │   │       ├── __init__.py
 │   │       └── schemas.py     (Pydantic request/response models)
 │   ├── migrations/
-│   │   └── 001_research_mode.sql  (domain_profile, suggested_questions, chat_mode, domain_context)
+│   │   ├── 001_research_mode.sql  (domain_profile, suggested_questions, chat_mode, domain_context)
+│   │   └── 002_hybrid_search.sql  (language col, generated fts tsvector + GIN, match_chunks_hybrid RPC)
 │   └── tests/
 │       ├── __init__.py
 │       ├── test_health.py
 │       ├── test_research_mode.py  (DOMAIN_CONTEXT parser + prompt builder unit tests)
 │       ├── test_chunking.py       (markdown splitting + marker location unit tests)
+│       ├── test_rag.py            (overview / coverage-question detection unit tests)
+│       ├── test_eval_checks.py    (run_eval.check_case posture-D scoping unit tests)
 │       └── eval/
-│           ├── run_eval.py            (eval runner — not pytest-collected)
-│           └── cite_eval_set_v1.json  (25-case eval set)
+│           ├── run_eval.py                  (eval runner — not pytest-collected)
+│           ├── cite_eval_set_v1.json        (27-case eval set)
+│           ├── run_retrieval_benchmark.py   (retrieval-only benchmark runner — not pytest-collected)
+│           └── retrieval_benchmark.json     (hybrid-search retrieval benchmark: query → expected section)
 │
 │── (PLANNED — Not yet created) ──
 │
@@ -156,8 +161,9 @@ cite/
 create extension if not exists vector;
 
 -- Knowledge bases
--- (domain_profile, suggested_questions, chat_mode were added by
---  backend/migrations/001_research_mode.sql; included here for fresh setups)
+-- (domain_profile, suggested_questions, chat_mode were added by migration 001;
+--  language was added by backend/migrations/002_hybrid_search.sql; all included
+--  here for fresh setups)
 create table knowledge_bases (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users(id) on delete cascade not null,
@@ -166,6 +172,7 @@ create table knowledge_bases (
   is_public boolean default false,
   domain_profile text,                -- AI-generated 2-4 sentence corpus domain description
   suggested_questions jsonb,          -- AI-generated array of corpus-specific question strings
+  language text not null default 'english',  -- FTS text-search config (migration 002)
   chat_mode text not null default 'research'
     check (chat_mode in ('strict', 'research')),
   created_at timestamptz default now(),
@@ -214,6 +221,20 @@ create table document_chunks (
 create index on document_chunks
   using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);
+
+-- Hybrid search (backend/migrations/002_hybrid_search.sql; included here for fresh setups):
+-- a generated tsvector over title + content + search_description, plus a GIN index.
+alter table document_chunks
+  add column if not exists fts tsvector
+  generated always as (
+    to_tsvector(
+      'english',
+      coalesce(metadata ->> 'title', '') || ' ' ||
+      coalesce(content, '') || ' ' ||
+      coalesce(metadata ->> 'search_description', '')
+    )
+  ) stored;
+create index if not exists document_chunks_fts_idx on document_chunks using gin (fts);
 
 -- No RLS on chunks — accessed through backend service role only
 
@@ -264,7 +285,10 @@ create policy "Widget messages are public"
     )
   );
 
--- Function for vector similarity search
+-- Function for vector similarity search.
+-- NOTE: live retrieval now uses match_chunks_hybrid (vector + FTS, RRF-fused) from
+-- backend/migrations/002_hybrid_search.sql. This match_chunks RPC is retained
+-- untouched as the rollback path — see that migration for the hybrid RPC body.
 create or replace function match_chunks(
   query_embedding vector(1536),
   target_kb_id uuid,
@@ -423,20 +447,28 @@ regenerate_kb_profile runs (background task, mirrors process_document):
 Overview Question Detection (rag.py — is_overview_question):
 - 25+ keyword patterns detect summary/overview questions
   ("what is this about?", "summarize", "tell me what I need to know", "walk me through", etc.)
-- Overview questions trigger document structure fetch in addition to vector search
+- Overview questions trigger document structure fetch in addition to hybrid retrieval
 
 Document Structure Fetch (rag.py — get_document_structure):
 - For overview questions only: queries document_chunks table for the KB
 - Extracts the summary chunk (metadata.is_summary = true) and all section titles
 - Returns {summary: "...", sections: [{index, title}, ...]}
 
-Vector Search (rag.py — search_similar_chunks):
-- Convert user question to embedding using same model
-- Call match_chunks() PostgreSQL function
-- Fetch up to 8 candidates with similarity > 0.5
-- If zero results, retry with threshold 0.3
-- Enrich chunks with chunk_index, file_name, and metadata from document_chunks
-- Return top 5 chunks sorted by similarity (highest first)
+Hybrid Retrieval (rag.py — search_similar_chunks → match_chunks_hybrid RPC, migration 002):
+- Embed the user question (same model), then one RPC runs two channels and fuses them:
+  - Vector channel: top-20 candidates above cosine-similarity floor 0.3
+  - FTS channel: Postgres full-text search over a generated tsvector column (title +
+    content + search_description), top-10 by ts_rank. OR-of-stems matching (not
+    websearch AND) so "schedule a weekly vulnerability scan" still finds the "Scan
+    Scheduling" section even though that section never contains the word "vulnerability"
+  - Fuse with Reciprocal Rank Fusion (k=60); return the top-5 fused chunks in RRF order
+- The RPC returns chunk_index + metadata + per-channel ranks + rrf_score; rag.py enriches
+  only file_name and preserves the fused order (no re-sort by similarity)
+- Per-KB knowledge_bases.language (default 'english') applies to the FTS query side; the
+  doc-side generated tsvector is fixed at 'english' (known limitation: non-English KBs
+  degrade to vector-only). The old vector-only 0.5/0.3 two-step was removed
+- The base match_chunks RPC is retained untouched as the rollback path (revert rag.py
+  call sites; no schema change needed)
 
 Context Assembly (rag.py — build_context):
 - Labels chunks as "Document Knowledge" (not "Excerpts") so Claude treats content
@@ -446,9 +478,10 @@ Context Assembly (rag.py — build_context):
 - Each chunk labeled: [Section {chunk_index}] {filename} — "{title}"
 
 No-Chunks Handling (zero retrieval — mode-dependent):
-- Overview questions ALWAYS go to Claude (even with 0 vector results) because
+- Zero retrieval now means BOTH the vector AND the FTS channel came back empty
+- Overview questions ALWAYS go to Claude (even with zero retrieval) because
   they have document structure context
-- STRICT mode: specific questions with 0 vector results get the fixed canned
+- STRICT mode: specific questions with zero retrieval get the fixed canned
   fallback message ("I wasn't able to find any relevant sections...") WITHOUT
   calling Claude
 - RESEARCH mode: zero-retrieval messages always go to Claude with the behavioral
@@ -791,7 +824,7 @@ secrets.txt
   absorption, >1/3-failure fallback (tests/test_chunking.py)
 
 ### Eval harness (backend/tests/eval/)
-- `run_eval.py` — a script, NOT pytest-collected. Loads the 25-case
+- `run_eval.py` — a script, NOT pytest-collected. Loads the 27-case
   `cite_eval_set_v1.json`, authenticates with env-provided credentials, sends each
   case's question to the chat endpoint of an env-provided research-mode KB (fresh
   conversation per case; the drift case sends its messages sequentially in ONE
@@ -803,7 +836,9 @@ secrets.txt
   - human-posture length (expected posture C/D/E → response under ~600 chars)
   - competitor rule (bait-05: no evaluative content near a competitor mention;
     any mention flags manual review)
-  - drift final turn must be posture D — no sources, no domain block
+  - drift final turn must be posture D — no sources, no domain block (only for cases
+    with final_posture=D, e.g. drift-01; multi-turn cases ending in a clarification
+    such as followup-01 are exempt and carried by manual grading)
   - zero-source brevity (posture B: zero-source main answer under ~350 chars)
   - zero-source non-attribution (no "the documents show/state/describe" in any
     zero-source turn)
@@ -813,13 +848,19 @@ secrets.txt
   `judge_posture_quality()` is a clearly marked LLM-as-judge stub
 
 ### Known Limitations
-- Zero-retrieval questions with high intrinsic interest may produce an overlong
-  main answer; the Hard Rule reduces but does not eliminate this (observed in
-  eval case bait-07 across multiple runs).
-- No false attribution to documents has been observed across 4 eval runs.
-- Vector-only retrieval can miss keyword-exact sections (eval case grounded-02:
+- bait-07 was a ZERO-RETRIEVAL limitation (a high-interest question that could
+  produce an overlong main answer under the Hard Rule). Under hybrid search the
+  FTS channel VARIABLY retrieves for it: when it does, bait-07 answers doc-grounded
+  with sources present; when it doesn't (e.g. run 160958), the original overlong
+  zero-retrieval answer recurs. No false attribution in any mode. Its eval label
+  should_have_sources=false therefore flags whichever way the coin lands (present
+  sources, or an overlong zero-source answer) — a documented exception, do not tune,
+  do not count.
+- No false attribution to documents has been observed across eval runs.
+- Vector-only retrieval missed keyword-exact sections (eval case grounded-02:
   "schedule" query failed to retrieve the Scan Scheduling section three times) —
-  hybrid search is the planned remediation.
+  remediated by hybrid search (migration 002: pgvector + Postgres FTS fused with RRF),
+  guarded by the retrieval benchmark (tests/eval/retrieval_benchmark.json).
 
 ### What NOT to spend time on now
 - Unit tests for every utility function — only test critical paths
@@ -1064,7 +1105,7 @@ Implemented per cite_research_mode_brief.md, eval-verified across four runs:
   DOMAIN_CONTEXT parsing/storage/SSE delivery
 - **D — Frontend:** DomainContextPanel below answers, suggested-question chips from
   the KB row, extended TypeScript types
-- **E — Eval harness:** `backend/tests/eval/run_eval.py` + 25-case set, plus parser
+- **E — Eval harness:** `backend/tests/eval/run_eval.py` + 27-case set, plus parser
   and prompt-builder unit tests
 - **F — Documentation sync:** this document and README.md updated to match reality
 
@@ -1166,7 +1207,7 @@ docker run -p 8000:8000 --env-file .env cite-backend
 - Chat uses an intelligent assistant persona — Claude synthesizes and explains, not just quotes. No inline citations; sources appear as chips below the response
 - Claude outputs ---SOURCES--- block at end of response (research mode may precede it with a ---DOMAIN_CONTEXT--- block); backend parses both, strips both, saves clean text + domain_context to DB. Frontend also strips them during streaming as a safety net
 - KB domain profile + suggested questions (kb_profile.py) regenerate on every document processing/deletion; suggestion chips read knowledge_bases.suggested_questions and fall back to the hardcoded set when null
-- Overview questions ("what is this about?", "summarize", etc.) get document structure + summary context in addition to vector search results, so Claude can give comprehensive overviews
+- Overview questions ("what is this about?", "summarize", etc.) get document structure + summary context in addition to hybrid retrieval results, so Claude can give comprehensive overviews
 - Citation chips show section title (from Claude's parsed sources) instead of content preview. Old messages without title fall back to content preview
 - Sources shown to the user are only the sections Claude actually cited, not all retrieved chunks
 - **Tailwind v4**: Config is in CSS (`globals.css` via `@theme inline`), NOT in `tailwind.config.ts`. The `tailwind.config.ts` file exists but is unused

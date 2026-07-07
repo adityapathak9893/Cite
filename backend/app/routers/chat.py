@@ -149,8 +149,8 @@ async def chat(
                 kb_id, document_structure is not None, request_id,
             )
 
-        # Search for similar chunks
-        chunks = search_similar_chunks(supabase, query_embedding, kb_id)
+        # Retrieve relevant chunks (hybrid: vector + FTS, RRF-fused)
+        chunks = search_similar_chunks(supabase, query_embedding, body.message, kb_id)
 
         # Build context for Claude
         context = build_context(

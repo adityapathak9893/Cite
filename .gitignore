@@ -45,6 +45,12 @@ coverage/
 htmlcov/
 .pytest_cache/
 
+# Eval / retrieval-benchmark run artifacts (timestamped outputs)
+backend/tests/eval/eval_results_*.json
+backend/tests/eval/eval_report_*.md
+backend/tests/eval/retrieval_benchmark_report_*.md
+backend/tests/eval/retrieval_benchmark_results_*.json
+
 # Secrets file (your local reference)
 secrets.txt
 

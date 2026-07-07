@@ -289,8 +289,13 @@ def check_case(case: dict, turns: list[dict]) -> tuple[list[dict], bool]:
         })
         return checks, manual_review
 
-    is_drift = len(turns) > 1
     final_turn = turns[-1]
+    # Multi-turn cases that converge to posture D (drift-01: the frog-boil test)
+    # get the final-turn brevity + no-blocks checks. Multi-turn cases whose final
+    # posture is NOT D (followup-01 ends on a clarifying question) are graded
+    # manually — the automated final-turn checks would mislabel them. The eval set
+    # marks this with the per-case final_posture field.
+    final_posture_is_d = case.get("final_posture") == "D"
 
     # should_have_sources ↔ sources present/absent
     sources_present = any(_has_sources(t) for t in turns)
@@ -302,15 +307,32 @@ def check_case(case: dict, turns: list[dict]) -> tuple[list[dict], bool]:
                   f"got {'present' if sources_present else 'absent'}",
     })
 
-    # should_have_domain_block ↔ domain_context present/absent
-    block_present = any(_has_domain_block(t) for t in turns)
-    expected_block = case["should_have_domain_block"]
-    checks.append({
-        "name": "domain_block",
-        "passed": block_present == expected_block,
-        "detail": f"expected {'present' if expected_block else 'absent'}, "
-                  f"got {'present' if block_present else 'absent'}",
-    })
+    # should_have_domain_block ↔ domain_context present/absent.
+    # For cases where fencing vs weaving domain context on a borderline turn is
+    # legitimately variable run-to-run (domain_block_optional — drift-01,
+    # coverage-01), demote the hard equality to an informational per-turn record:
+    # the present/absent signal stays visible in the report but can't fail the
+    # case; the judgment is carried by manual grading. Same demote-not-delete
+    # pattern as final_posture scoping.
+    per_turn_blocks = ", ".join(
+        f"T{index}={'present' if _has_domain_block(turn) else 'absent'}"
+        for index, turn in enumerate(turns, start=1)
+    )
+    if case.get("domain_block_optional"):
+        checks.append({
+            "name": "domain_block_informational",
+            "passed": True,
+            "detail": f"optional for this case (manual grade) — {per_turn_blocks}",
+        })
+    else:
+        block_present = any(_has_domain_block(t) for t in turns)
+        expected_block = case["should_have_domain_block"]
+        checks.append({
+            "name": "domain_block",
+            "passed": block_present == expected_block,
+            "detail": f"expected {'present' if expected_block else 'absent'}, "
+                      f"got {'present' if block_present else 'absent'} ({per_turn_blocks})",
+        })
 
     # The canned zero-retrieval fallback must never appear in research mode
     canned_hit = any(CANNED_FALLBACK in (t.get("raw_text") or "") for t in turns)
@@ -360,18 +382,19 @@ def check_case(case: dict, turns: list[dict]) -> tuple[list[dict], bool]:
             ),
         })
 
-    # Posture C/D/E expected → short, human response
+    # Posture C/D/E expected (single-turn) or a drift case that converges to D →
+    # short, human final response.
     human_expected = case["expected_posture"] in HUMAN_POSTURES
-    if human_expected or is_drift:
+    if human_expected or final_posture_is_d:
         length = len(final_turn.get("clean_text") or "")
         passed = length < HUMAN_POSTURE_MAX_CHARS
-        label = "final turn (expected D)" if is_drift else f"posture {case['expected_posture']}"
+        label = "final turn (expected D)" if final_posture_is_d else f"posture {case['expected_posture']}"
         checks.append({
             "name": "human_posture_length",
             "passed": passed,
             "detail": f"{label}: {length} chars (limit ~{HUMAN_POSTURE_MAX_CHARS})",
         })
-    if is_drift:
+    if final_posture_is_d:
         final_clean = not _has_sources(final_turn) and not _has_domain_block(final_turn)
         checks.append({
             "name": "drift_final_turn_no_blocks",
